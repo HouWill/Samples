@@ -33,9 +33,14 @@ function WaitForState ($instanceid, $desiredstate)
 
 $folder = "c:\temp" # Location to store some temp stuff like keypair
 
-# PSModule should be autoloaded, setup adds the PSModulePath (PS v3 and above), otherwise import-module
+# PSModule should be autoloaded in PS v3.0 and above
+# setup adds AWS module location to the PSModulePath
+# To manually load PSModule
 # import-module "C:\Program Files (x86)\AWS Tools\PowerShell\AWSPowerShell\AWSPowerShell.psd1"
-Get-AWSPowerShellVersion -ListServices
+
+
+# To check if AWS PS module is accessible.
+# Get-AWSPowerShellVersion -ListServices
 
 #Create the firewall security group, Allows ping traffic, RDP and PowerShell remote connection
 $groupid = New-EC2SecurityGroup sg1  -Description "Security group 1"
@@ -52,11 +57,11 @@ Grant-EC2SecurityGroupIngress -GroupName sg1 -IpPermissions @{IpProtocol = "tcp"
 
 #create a KeyPair, this is used to encrypt the Administrator password.
 $keypair1 = New-EC2KeyPair -KeyName keypair1
-"KeyName: $($keypair1.KeyName)" | out-file -encoding ascii -filepath $folder\keypair1.pem
+"$($keypair1.KeyMaterial)" | out-file -encoding ascii -filepath $folder\keypair1.pem
+"KeyName: $($keypair1.KeyName)" | out-file -encoding ascii -filepath $folder\keypair1.pem -Append
 "KeyFingerprint: $($keypair1.KeyFingerprint)" | out-file -encoding ascii -filepath $folder\keypair1.pem -Append
-"KeyMaterial:`n$($keypair1.KeyMaterial)" | out-file -encoding ascii -filepath $folder\keypair1.pem -Append
 
-Get-EC2KeyPair keypair1
+#Get-EC2KeyPair keypair1
 
 #Find the Windows Server 2012 imageid
 $a = Get-EC2Image -Filters @{Name = "name"; Values = "Windows_Server-2012-RTM-English-64Bit-Base*"}
@@ -92,6 +97,7 @@ while ($true)
 
 $password = $null
 #Wait until the password is available
+#blindsly eats all the exceptions, bad idea for a production code.
 while ($password -eq $null)
 {
     try
