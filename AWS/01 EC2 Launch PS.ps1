@@ -90,6 +90,7 @@ $userdata = @"
 md c:\temp
 'Hello a是!' | Out-File 'c:\temp\out.txt'
 Set-NetFirewallRule -Name WINRM-HTTP-In-TCP-PUBLIC -RemoteAddress Any
+Enable-NetFirewallRule FPS-ICMP4-ERQ-In
 </powershell>
 "@
 $userdataBase64Encoded = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($userdata))
@@ -128,7 +129,7 @@ while ($password -eq $null)
     }
 }
 
-$password
+$publicDNS, $password
 
 $securepassword = ConvertTo-SecureString $password -AsPlainText -Force
 $creds = New-Object System.Management.Automation.PSCredential ("Administrator", $securepassword)
