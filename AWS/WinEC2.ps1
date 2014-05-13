@@ -54,6 +54,7 @@ function New-WinEC2Instance
         )
 
     trap { break } #This stops execution on any exception
+    $ErrorActionPreference = 'Stop'
     Set-DefaultAWSRegion $Region
     Write-Verbose ("New-WinEC2Instance InstanceType=$InstanceType, ImagePrefix=$ImagePrefix,Region=$Region," + 
             "SecurityGroupName=$SecurityGroupName, ComputerName=$ComputerName,PrivateIPAddress=$PrivateIPAddress")
@@ -92,10 +93,26 @@ function New-WinEC2Instance
         MaxCount = 1
         InstanceType = $InstanceType
         KeyName = $KeyPairName
-        SecurityGroups = $SecurityGroupName
+        SecurityGroupIds = (Get-EC2SecurityGroup -GroupNames $SecurityGroupName).GroupId
         UserData = $userdataBase64Encoded
     }
-    $(if ($PrivateIPAddress){ $parameters.'PrivateIPAddress' = $PrivateIPAddress})
+
+    if ($PrivateIPAddress)
+    { 
+        $parameters.'PrivateIPAddress' = $PrivateIPAddress
+        foreach ($subnet in Get-EC2Subnet)
+        {
+            if (checkSubnet $subnet.CidrBlock $PrivateIPAddress)
+            {
+                $parameters.'SubnetId' = $subnet.SubnetId
+                break
+            }
+        }
+        if (-not $parameters.ContainsKey('SubnetId'))
+        {
+            throw "Matching subnet for $PrivateIPAddress not found"
+        }
+    }
 
     $a = New-EC2Instance @parameters
     $instance = $a.Instances[0]
@@ -159,6 +176,18 @@ function New-WinEC2Instance
     $instance
 }
 
+function checkSubnet ([string]$cidr, [string]$ip)
+{
+    $network, [int]$subnetlen = $cidr.Split('/')
+    $a = [uint32[]]$network.split('.')
+    [uint32] $unetwork = ($a[0] -shl 24) + ($a[1] -shl 16) + ($a[2] -shl 8) + $a[3]
+    $mask = (-bnot [uint32]0) -shl (32 - $subnetlen)
+
+    $a = [uint32[]]$ip.split('.')
+    [uint32] $uip = ($a[0] -shl 24) + ($a[1] -shl 16) + ($a[2] -shl 8) + $a[3]
+
+    $unetwork -eq ($mask -band $uip)
+}
 
 function findInstance ([Parameter (Position=1, Mandatory=$true)]$computerNameOrInstanceId,
     [string][Parameter(Position=2)]$desiredState = '*'
@@ -201,6 +230,7 @@ function Stop-WinEC2Instance (
     )
 {
     trap { break }
+    $ErrorActionPreference = 'Stop'
     Set-DefaultAWSRegion $Region
     Write-Verbose "Stop-WinEC2Instance - ComputerNameOrInstanceId=$ComputerNameOrInstanceId, Region=$Region"
 
@@ -221,6 +251,7 @@ function Start-WinEC2Instance (
     )
 {
     trap { break }
+    $ErrorActionPreference = 'Stop'
     Set-DefaultAWSRegion $Region
     Write-Verbose "Start-WinEC2Instance - ComputerNameOrInstanceId=$ComputerNameOrInstanceId, Region=$Region"
     $startTime = Get-Date
@@ -256,6 +287,7 @@ function ReStart-WinEC2Instance (
     )
 {
     trap { break }
+    $ErrorActionPreference = 'Stop'
     Set-DefaultAWSRegion $Region
     Write-Verbose "ReStart-WinEC2Instance - ComputerNameOrInstanceId=$ComputerNameOrInstanceId, Region=$Region"
 
@@ -329,6 +361,7 @@ function Remove-WinEC2Instance (
     )
 {
     trap { break }
+    $ErrorActionPreference = 'Stop'
     Set-DefaultAWSRegion $Region
     Write-Verbose "Remove-WinEC2Instance - ComputerNameOrInstanceId=$ComputerNameOrInstanceId, Region=$Region"
 
@@ -353,6 +386,7 @@ function New-WinEC2KeyPair (
     )
 {
     trap { break }
+    $ErrorActionPreference = 'Stop'
     Set-DefaultAWSRegion $Region
     $keyfile = "$DefaultKeypairFolder\$Region.$KeyPairName.pem"
     Write-Verbose "New-WinEC2KeyPair - Keyfile=$keyfile"
@@ -374,6 +408,7 @@ function Remove-WinEC2KeyPair (
     )
 {
     trap { break }
+    $ErrorActionPreference = 'Stop'
     Set-DefaultAWSRegion $Region
     $keyfile = "$DefaultKeypairFolder\$Region.$KeyPairName.pem"
     Write-Verbose "Remove-WinEC2KeyPair - Keyfile=$keyfile"
@@ -382,18 +417,10 @@ function Remove-WinEC2KeyPair (
     {
         Remove-Item $keyfile -Force
     }
-    else
-    {
-        Write-Error "Remove-WinEC2KeyPair - Keyfile=$keyfile Not Found"
-    }
 
     if (Get-EC2KeyPair -KeyNames $KeyPairName)
     {
         Remove-EC2KeyPair -KeyName $KeyPairName -Force
-    }
-    else
-    {
-        Write-Error "Remove-WinEC2KeyPair - KeyPair with name=$KeyPairName not found in Region=$Region"
     }
 }
 
@@ -420,6 +447,40 @@ function Get-WinEC2KeyFile (
 
     $keyfile
 }
+
+function Confirm-WinEC2KeyPairAllRegion
+{
+    $keys = @{}
+    $regions = Get-AWSRegion
+    foreach ($region in $regions)
+    {
+        if ($region.Region -eq 'cn-north-1')
+        {
+            continue;
+        }
+
+        foreach ($keypair in Get-EC2KeyPair -Region $Region.Region)
+        {
+            $keys.Add("$($Region.Region).$($keypair.KeyName)", $keypair)
+        }
+    }
+
+    $files = @{}
+    foreach ($file in Get-ChildItem $DefaultKeypairFolder\*.pem)
+    {
+        if ($keys.ContainsKey($file.BaseName))
+        {
+            $keys.Remove($file.BaseName)
+        }
+        else
+        {
+            $files.Add($file.BaseName, $file)
+        }
+    }
+    $files
+    $keys
+}
+
 
 function Remove-WinEC2InstanceAllRegion
 {
