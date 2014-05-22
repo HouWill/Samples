@@ -48,7 +48,7 @@ configuration main
            # PSDscAllowPlainTextPassword = $true
             UserName = "u1"
             Password = $cred
-            Disabled = $true # There might be a bug here. Re application throws an error.
+            Disabled = $false # There might be a bug here. Re application throws an error.
         }
 
         #create a group and administrator and u1 created above to it.

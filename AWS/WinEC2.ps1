@@ -39,25 +39,28 @@ $DefaultRegion = 'us-east-1'
 $DefaultKeypairFolder = 'c:\temp'
 
 # Lanch EC2 Instance and set the new password
+
 function New-WinEC2Instance
 {
     param (
-        [string]$InstanceType = 'm3.medium', 
-        [string]$ImagePrefix = 'Windows_Server-2012-RTM-English-64Bit-Base',
+        [string]$InstanceType = 'm3.medium',
+        [string]$ImagePrefix = 'Windows_Server-2012-RTM-English-64Bit-Base', # Windows_Server-2012-RTM-English-64Bit-SQL_2012_SP1_Standard-2014.05.14
         [string]$Region = $DefaultRegion,
-        [string]$Password = $null,  # if the password is already baked in the image, specify the password
+        [string]$Password = $null, # if the password is already baked in the image, specify the password
         [string]$NewPassword = $null, # change the passowrd to this new value
-        [string]$SecurityGroupName = 'sg_rdp_ps_http_icmp',
+        [string]$SecurityGroupName = 'sg_winec2',
         [string]$KeyPairName = 'winec2keypair',
-        [string]$ComputerName = $null,
-        [string]$PrivateIPAddress = $null
+        [string]$Name = $null,
+        [string]$PrivateIPAddress = $null,
+        [int32]$IOPS = 0
         )
 
     trap { break } #This stops execution on any exception
     $ErrorActionPreference = 'Stop'
     Set-DefaultAWSRegion $Region
-    Write-Verbose ("New-WinEC2Instance InstanceType=$InstanceType, ImagePrefix=$ImagePrefix,Region=$Region," + 
-            "SecurityGroupName=$SecurityGroupName, ComputerName=$ComputerName,PrivateIPAddress=$PrivateIPAddress")
+    Write-Verbose ("New-WinEC2Instance InstanceType=$InstanceType, ImagePrefix=$ImagePrefix,Region=$Region, " +
+            "SecurityGroupName=$SecurityGroupName, Name=$Name,PrivateIPAddress=$PrivateIPAddress, " +
+            "IOPS=$IOPS")
     $startTime = Get-Date
 
     $keyfile = Get-WinEC2KeyFile $KeyPairName
@@ -77,18 +80,18 @@ function New-WinEC2Instance
     #Launch the instance
     $userdata = @"
 <powershell>
-    Enable-NetFirewallRule FPS-ICMP4-ERQ-In
-    Set-NetFirewallRule -Name WINRM-HTTP-In-TCP-PUBLIC -RemoteAddress Any
-    New-NetFirewallRule -Name "WinRM80" -DisplayName "WinRM80" -Protocol TCP -LocalPort 80
-    Set-Item (dir wsman:\localhost\Listener\*\Port -Recurse).pspath 80 -Force
-    $(if ($ComputerName -ne $null) {"Rename-Computer -NewName '$ComputerName'`nRestart-Computer" })
-    net stop winrm
-    net start winrm
+Enable-NetFirewallRule FPS-ICMP4-ERQ-In
+Set-NetFirewallRule -Name WINRM-HTTP-In-TCP-PUBLIC -RemoteAddress Any
+New-NetFirewallRule -Name "WinRM80" -DisplayName "WinRM80" -Protocol TCP -LocalPort 80
+Set-Item WSMan:\localhost\Service\EnableCompatibilityHttpListener -Value true
+#Set-Item (dir wsman:\localhost\Listener\*\Port -Recurse).pspath 80 -Force
+$(if ($Name -ne $null) {"Rename-Computer -NewName '$Name';Restart-Computer" }
+)
 </powershell>
 "@
     $userdataBase64Encoded = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($userdata))
     $parameters = @{
-        ImageId = $imageid 
+        ImageId = $imageid
         MinCount = 1
         MaxCount = 1
         InstanceType = $InstanceType
@@ -98,7 +101,7 @@ function New-WinEC2Instance
     }
 
     if ($PrivateIPAddress)
-    { 
+    {
         $parameters.'PrivateIPAddress' = $PrivateIPAddress
         foreach ($subnet in Get-EC2Subnet)
         {
@@ -113,58 +116,80 @@ function New-WinEC2Instance
             throw "Matching subnet for $PrivateIPAddress not found"
         }
     }
+    if ($IOPS -gt 0)
+    {
+        $Volume = New-Object Amazon.EC2.Model.EbsBlockDevice
+        $Volume.DeleteOnTermination = $True
+        $Volume.VolumeSize = 30
+        $Volume.VolumeType = 'io1'
+        $volume.IOPS = $IOPS
+
+        $Mapping = New-Object Amazon.EC2.Model.BlockDeviceMapping
+        $Mapping.DeviceName = '/dev/sda1'
+        $Mapping.Ebs = $Volume
+
+        $parameters.'EbsOptimized' = $True
+        $parameters.'BlockDeviceMapping' = $Mapping
+    }
 
     $a = New-EC2Instance @parameters
     $instance = $a.Instances[0]
     $instanceid = $instance.InstanceId
     Write-Verbose "instanceid=$instanceid"
 
-    if ($ComputerName)
+    if ($Name)
     {
-        New-EC2Tag -ResourceId $instanceid -Tag @{Key='ComputerName'; Value=$ComputerName}
+        New-EC2Tag -ResourceId $instanceid -Tag @{Key='Name'; Value=$Name}
     }
 
     $cmd = { $(Get-EC2Instance -Filter @{Name = "instance-id"; Values = $instanceid}).Instances[0].State.Name -eq "Running" }
-    $a = Wait $cmd "New-WinEC2Instance - Waiting for running state" 450
+    $a = Wait $cmd "New-WinEC2Instance - running state" 450
     $runningTime = Get-Date
         
     #Wait for ping to succeed
     $a = Get-EC2Instance -Filter @{Name = "instance-id"; Values = $instanceid}
     $publicDNS = $a.Instances[0].PublicDnsName
 
-    $cmd = { ping  $publicDNS; $LASTEXITCODE -eq 0}
-    $a = Wait $cmd "New-WinEC2Instance - Waiting for ping" 450
+    $cmd = { ping $publicDNS; $LASTEXITCODE -eq 0}
+    $a = Wait $cmd "New-WinEC2Instance - ping" 450
     $pingTime = Get-Date
 
     #Wait until the password is available
     if (-not $Password)
     {
         $cmd = {Get-EC2PasswordData -InstanceId $instanceid -PemFile $keyfile -Decrypt}
-        $Password = Wait $cmd "New-WinEC2Instance - Waiting to retreive password" 600
+        $Password = Wait $cmd "New-WinEC2Instance - retreive password" 600
     }
 
-    Write-Verbose "$Password  $publicDNS"
+    Write-Verbose "$Password $publicDNS"
 
     $securepassword = ConvertTo-SecureString $Password -AsPlainText -Force
     $creds = New-Object System.Management.Automation.PSCredential ("Administrator", $securepassword)
     $passwordTime = Get-Date
     
     $cmd = {New-PSSession $publicDNS -Credential $creds -Port 80}
-    $s = Wait $cmd "New-WinEC2Instance - Establishing remote connection" 300
+    $s = Wait $cmd "New-WinEC2Instance - remote connection" 300
 
     if ($NewPassword)
     {
         #Change password
         $cmd = { param($password)	
-	            $admin=[adsi]("WinNT://$env:computername/administrator, user")
-	            $admin.psbase.invoke('SetPassword', $password) }
-
-        Invoke-Command -Session $s $cmd -ArgumentList $NewPassword 2>$null
-
+                    $admin=[adsi]("WinNT://$env:computername/administrator, user")
+                    $admin.psbase.invoke('SetPassword', $password) }
+        
+        try
+        {
+            Invoke-Command -Session $s $cmd -ArgumentList $NewPassword 2>$null
+        }
+        catch # sometime it gives access denied error. ok to mask this error, the next connect will fail if there is an issue.
+        {
+        }
+        Write-Verbose 'Completed setting the new password.'
         Remove-PSSession $s
         $securepassword = ConvertTo-SecureString $NewPassword -AsPlainText -Force
         $creds = New-Object System.Management.Automation.PSCredential ("Administrator", $securepassword)
-        $s = New-PSSession $publicDNS -Credential $creds -Port 80 
+        $s = New-PSSession $publicDNS -Credential $creds -Port 80
+        Write-Verbose 'Test connection established using new password.'
     }
     Remove-PSSession $s
     $remoteTime = Get-Date
@@ -175,6 +200,7 @@ function New-WinEC2Instance
     Write-Verbose ('New-WinEC2Instance - {0:mm}:{0:ss} - to establish remote connection' -f ($remoteTime - $startTime))
     $instance
 }
+
 
 function checkSubnet ([string]$cidr, [string]$ip)
 {
@@ -189,63 +215,76 @@ function checkSubnet ([string]$cidr, [string]$ip)
     $unetwork -eq ($mask -band $uip)
 }
 
-function findInstance ([Parameter (Position=1, Mandatory=$true)]$computerNameOrInstanceId,
+#desired state can be *, or specific names like running or !running
+function findInstance ([Parameter (Position=1, Mandatory=$true)]$nameOrInstanceId,
     [string][Parameter(Position=2)]$desiredState = '*'
     )
 {
     $instance = $null
 
+    $notfilter = $false
+    $allfilter = $false
+    if ($desiredState -eq '*')
+    {
+        $allfilter = $true
+    }
+    elseif ($desiredState[0] -eq '!')
+    {
+        $notfilter = $true
+        $desiredState = $desiredState.Substring(1)
+    }
+
     foreach ($tempinstance in (Get-EC2Instance).Instances)
     {
-        if ($tempinstance.InstanceId -eq $computerNameOrInstanceId)
+        if ($allfilter -or
+            ($notfilter -and $tempinstance.State.Name -ne $desiredState) -or
+            (-not $notfilter -and $tempinstance.State.Name -eq $desiredState))
         {
-            $instance = $tempinstance
-            break
-        } 
-        foreach ($tag in $tempinstance.Tag)
-        {
-            if ($tag.Key -eq 'ComputerName' -and $tag.Value -eq $computerNameOrInstanceId)
+            if ($tempinstance.InstanceId -eq $nameOrInstanceId)
             {
                 $instance = $tempinstance
                 break
+            } 
+            foreach ($tag in $tempinstance.Tag)
+            {
+                if ($tag.Key -eq 'Name' -and $tag.Value -eq $nameOrInstanceId)
+                {
+                    $instance = $tempinstance
+                    break
+                }
             }
         }
     }
     if ($instance -eq $null)
     {
-        throw "$computerNameOrInstanceId is neither an instanceid or found in Tag with key=ComputerName"
-    }
-
-    if (-not ($instance.State.Name -like $desiredState))
-    {
-        throw "Current instance state is $($instance.State.Name), only $desiredState is valid."
+        throw "$nameOrInstanceId is neither an instanceid or found in Tag with key=Name"
     }
 
     $instance
 }
 
 function Stop-WinEC2Instance (
-        [Parameter (Position=1, Mandatory=$true)]$ComputerNameOrInstanceId,
+        [Parameter (Position=1, Mandatory=$true)]$NameOrInstanceId,
         [Parameter(Position=2)]$Region=$DefaultRegion
     )
 {
     trap { break }
     $ErrorActionPreference = 'Stop'
     Set-DefaultAWSRegion $Region
-    Write-Verbose "Stop-WinEC2Instance - ComputerNameOrInstanceId=$ComputerNameOrInstanceId, Region=$Region"
+    Write-Verbose "Stop-WinEC2Instance - NameOrInstanceId=$NameOrInstanceId, Region=$Region"
 
-    $instance = findInstance $ComputerNameOrInstanceId 'running'
+    $instance = findInstance $NameOrInstanceId 'running'
     $InstanceId = $instance.InstanceId
 
     $a = Stop-EC2Instance -Instance $InstanceId -Force
 
     $cmd = { (Get-EC2Instance -Instance $InstanceId).Instances[0].State.Name -eq "Stopped" }
-    $a = Wait $cmd "Stop-WinEC2Instance - Waiting for Stopped state" 450
+    $a = Wait $cmd "Stop-WinEC2Instance - Stopped state" 450
 }
 
 
 function Start-WinEC2Instance (
-        [Parameter (Position=1, Mandatory=$true)]$ComputerNameOrInstanceId,
+        [Parameter (Position=1, Mandatory=$true)]$NameOrInstanceId,
         [System.Management.Automation.PSCredential][Parameter(Mandatory=$true, Position=2)]$Cred,
         [Parameter(Position=3)]$Region=$DefaultRegion
     )
@@ -253,16 +292,16 @@ function Start-WinEC2Instance (
     trap { break }
     $ErrorActionPreference = 'Stop'
     Set-DefaultAWSRegion $Region
-    Write-Verbose "Start-WinEC2Instance - ComputerNameOrInstanceId=$ComputerNameOrInstanceId, Region=$Region"
+    Write-Verbose "Start-WinEC2Instance - NameOrInstanceId=$NameOrInstanceId, Region=$Region"
     $startTime = Get-Date
 
-    $instance = findInstance $ComputerNameOrInstanceId 'stopped'
+    $instance = findInstance $NameOrInstanceId 'stopped'
     $InstanceId = $instance.InstanceId
  
     $a = Start-EC2Instance -Instance $InstanceId
 
     $cmd = { $(Get-EC2Instance -Instance $InstanceId).Instances[0].State.Name -eq "running" }
-    $a = Wait $cmd "Start-WinEC2Instance - Waiting for running state" 450
+    $a = Wait $cmd "Start-WinEC2Instance - running state" 450
 
     #Wait for ping to succeed
     $instance = (Get-EC2Instance -Instance $InstanceId).Instances[0]
@@ -271,7 +310,7 @@ function Start-WinEC2Instance (
     Write-Verbose "publicDNS = $($instance.PublicDnsName)"
 
     $cmd = { ping  $publicDNS; $LASTEXITCODE -eq 0}
-    $a = Wait $cmd "Start-WinEC2Instance - Waiting for ping" 450
+    $a = Wait $cmd "Start-WinEC2Instance - ping" 450
 
     $cmd = {New-PSSession $publicDNS -Credential $Cred -Port 80}
     $s = Wait $cmd "Start-WinEC2Instance - Establishing remote connection" 300
@@ -281,7 +320,7 @@ function Start-WinEC2Instance (
 }
 
 function ReStart-WinEC2Instance (
-        [Parameter (Position=1, Mandatory=$true)]$ComputerNameOrInstanceId,
+        [Parameter (Position=1, Mandatory=$true)]$NameOrInstanceId,
         [System.Management.Automation.PSCredential][Parameter(Mandatory=$true, Position=2)]$Cred,
         [Parameter(Position=3)]$Region=$DefaultRegion
     )
@@ -289,10 +328,10 @@ function ReStart-WinEC2Instance (
     trap { break }
     $ErrorActionPreference = 'Stop'
     Set-DefaultAWSRegion $Region
-    Write-Verbose "ReStart-WinEC2Instance - ComputerNameOrInstanceId=$ComputerNameOrInstanceId, Region=$Region"
+    Write-Verbose "ReStart-WinEC2Instance - NameOrInstanceId=$NameOrInstanceId, Region=$Region"
 
     $startTime = Get-Date
-    $instance = findInstance $ComputerNameOrInstanceId 'running'
+    $instance = findInstance $NameOrInstanceId 'running'
     $InstanceId = $instance.InstanceId
     $publicDNS = $instance.PublicDnsName
  
@@ -300,11 +339,11 @@ function ReStart-WinEC2Instance (
 
     #Wait for ping to fail
     $cmd = { ping  $publicDNS; $LASTEXITCODE -ne 0}
-    $a = Wait $cmd "ReStart-WinEC2Instance - Waiting for ping to fail" 450
+    $a = Wait $cmd "ReStart-WinEC2Instance - ping to fail" 450
 
     #Wait for ping to succeed
     $cmd = { ping  $publicDNS; $LASTEXITCODE -eq 0}
-    $a = Wait $cmd "ReStart-WinEC2Instance - Waiting for ping to succeed" 450
+    $a = Wait $cmd "ReStart-WinEC2Instance - ping to succeed" 450
 
     $cmd = {New-PSSession $publicDNS -Credential $Cred -Port 80}
     $s = Wait $cmd "ReStart-WinEC2Instance - Establishing remote connection" 300
@@ -315,14 +354,14 @@ function ReStart-WinEC2Instance (
 
 
 function Connect-WinEC2Instance (
-        [Parameter (Position=1, Mandatory=$true)]$ComputerNameOrInstanceId,
+        [Parameter (Position=1, Mandatory=$true)]$NameOrInstanceId,
         $Region=$DefaultRegion
     )
 {
     trap { break }
     Set-DefaultAWSRegion $Region
 
-    $instance = findInstance $ComputerNameOrInstanceId 'running'
+    $instance = findInstance $NameOrInstanceId 'running'
     mstsc /v:$($instance.PublicIpAddress)
 }
 
@@ -340,7 +379,7 @@ function Get-WinEC2Instance
            InstanceId=$instance.InstanceId
            State = $instance.State.Name
            PublicIpAddress = $instance.PublicIpAddress
-           PublicDNS = $instances.PublicDNS
+           PublicDNSName = $instance.PublicDNSName
            PrivateIpAddress = $instance.PrivateIpAddress
            NetworkInterfaces = $instance.NetworkInterfaces
            InstanceType = $instance.InstanceType
@@ -356,27 +395,27 @@ function Get-WinEC2Instance
 }
 
 function Remove-WinEC2Instance (
-        [Parameter (Position=1, Mandatory=$true)]$ComputerNameOrInstanceId,
+        [Parameter (Position=1, Mandatory=$true)]$NameOrInstanceId,
         [Parameter(Position=2)]$Region=$DefaultRegion
     )
 {
     trap { break }
     $ErrorActionPreference = 'Stop'
     Set-DefaultAWSRegion $Region
-    Write-Verbose "Remove-WinEC2Instance - ComputerNameOrInstanceId=$ComputerNameOrInstanceId, Region=$Region"
+    Write-Verbose "Remove-WinEC2Instance - NameOrInstanceId=$NameOrInstanceId, Region=$Region"
 
-    $instance = findInstance $ComputerNameOrInstanceId '*'
+    $instance = findInstance $NameOrInstanceId '!terminated'
 
     if ($instance.State.Name -eq 'terminated')
     {
-        throw "Remove-WinEC2Instance - ComputerNameOrInstanceId=$ComputerNameOrInstanceId alrady terminated"
+        throw "Remove-WinEC2Instance - NameOrInstanceId=$NameOrInstanceId alrady terminated"
     }
     else
     {
         $a = Stop-EC2Instance -Instance $instance.InstanceId -Force -Terminate
 
         $cmd = { $(Get-EC2Instance -Instance $instance.InstanceId).Instances[0].State.Name -eq 'terminated' }
-        $a = Wait $cmd "Remove-WinEC2Instance - Waiting for terminate state" 450
+        $a = Wait $cmd "Remove-WinEC2Instance - terminate state" 450
     }
 }
 
@@ -529,31 +568,134 @@ function Cleanup-WinEC2
     Remove-WinEC2KeyPairAllRegion
 }
 
+function Update-WinEC2FireWallSource
+{
+    param (
+        $SecurityGroupName = 'sg_winec2',
+        $Region=$DefaultRegion,
+        $VpcId = (Get-EC2Vpc | ? {$_.IsDefault}).VpcId,
+        [Amazon.EC2.Model.IpPermission[]] $IpCustomPermissions
+    )
+    trap {break }
+    $ErrorActionPreference = 'Stop'
+    Set-DefaultAWSRegion $Region
+
+    if ($IpCustomPermissions.Length -eq 0)
+    {
+        $bytes = (Invoke-WebRequest 'http://checkip.amazonaws.com/').Content
+        $SourceIPRange = @(([System.Text.Encoding]::Ascii.GetString($bytes).Trim() + "/32"))
+        Write-Verbose "$sourceIPRange retreived from checkip.amazonaws.com"
+        $IpCustomPermissions = @(
+            @{IpProtocol = 'tcp'; FromPort = 3389; ToPort = 3389; IpRanges = $SourceIPRange},
+            @{IpProtocol = 'tcp'; FromPort = 5985; ToPort = 5986; IpRanges = $SourceIPRange},
+            @{IpProtocol = 'tcp'; FromPort = 80; ToPort = 80; IpRanges = $SourceIPRange},
+            @{IpProtocol = 'icmp'; FromPort = -1; ToPort = -1; IpRanges = $SourceIPRange}
+        )
+
+        if ($VpcId)
+        {
+            $CIDRs = (Get-EC2Subnet -Filters @{Name='vpc-id'; value=$VpcId}).CidrBlock
+            if ($CIDRs)
+            {
+                $IpCustomPermissions += @{IpProtocol = -1; FromPort = 0; ToPort = 0; IpRanges = @($CIDRs)}
+            }
+        }
+    }
+
+    $sg = Get-EC2SecurityGroup | ? { $_.GroupName -eq $SecurityGroupName}
+    if ($sg -eq $null)
+    {
+        #Create the firewall security group
+        $groupid = New-EC2SecurityGroup $SecurityGroupName  -Description "WinEC2"
+    }
+    
+    foreach ($ipPermission in $sg.IpPermissions)
+    {
+        $found = $false
+        for ($i = 0; $i -lt $IpCustomPermissions.Length; $i++)
+        {
+            $ipCustomPermission = $IpCustomPermissions[$i]
+            if ($ipPermission.IpProtocol -eq $ipCustomPermission.IpProtocol -and 
+                $ipPermission.FromPort -eq $ipCustomPermission.FromPort -and 
+                $ipPermission.ToPort -eq $ipCustomPermission.ToPort)
+            {
+                $match = $true
+                if ($ipPermission.IpRanges.Count -eq $ipCustomPermission.IpRanges.Count)
+                {
+                    foreach ($ipRange in $ipCustomPermission.IpRanges)
+                    {
+                        if (-not $ipPermission.IpRanges.Contains($ipRange))
+                        {
+                            $match = $false
+                            break
+                        }
+                    }
+                }
+                if ($match)
+                {
+                    $IpCustomPermissions[$i] = $null
+                    $found = $true
+                    break
+                }
+            }
+        }
+        if ($found)
+        {
+            Write-Verbose ('Update-WinEC2FireWallSource - Skipped Protocol=' + $ipPermission.IpProtocol + `
+                            ', FromPort=' + $ipPermission.FromPort + ', ToPort=' + $ipPermission.ToPort + `
+                            ', IpRanges=' + $ipPermission.IpRanges)
+
+        }
+        else
+        {
+            Revoke-EC2SecurityGroupIngress -GroupName $SecurityGroupName `
+                -IpPermissions $ipPermission
+            Write-Verbose ('Update-WinEC2FireWallSource - Revoked Protocol=' + $ipPermission.IpProtocol + `
+                            ', FromPort=' + $ipPermission.FromPort + ', ToPort=' + $ipPermission.ToPort + `
+                            ', IpRanges=' + $ipPermission.IpRanges)
+        }
+    }
+    foreach ($IpCustomPermission in $IpCustomPermissions)
+    {
+        if ($IpCustomPermission)
+        {
+            Grant-EC2SecurityGroupIngress -GroupName $SecurityGroupName `
+                -IpPermissions $IpCustomPermission
+            Write-Verbose ('Update-WinEC2FireWallSource - Granted Protocol=' + $IpCustomPermission.IpProtocol + `
+                            ', FromPort=' + $IpCustomPermission.FromPort + ', ToPort=' + $IpCustomPermission.ToPort + `
+                            ', IpRanges=' + $IpCustomPermission.IpRanges)
+        }
+    }
+
+    Write-Verbose "Update-WinEC2FireWallSource - Updated $SecurityGroupName"
+}
+
 
 # Creates or updates the security group
 # Default it enables RDP, PowerShell, HTTP and ICMP.
 # Define appropriate switch to disable specific protocol
 # If SourceIPRange is not defined, it configures based on http://checkip.amazonaws.com
-function Update-WinEC2FireWallSource
+function Update-WinEC2FireWallSource2
 {
     param (
-        $SecurityGroupName = 'sg_rdp_ps_http_icmp',
+        $SecurityGroupName = 'sg_winec2',
         $Region=$DefaultRegion,
         $SourceIPRange = $null,
         [switch] $NoRDP,
         [switch] $NoPS,
         [switch] $NoHTTP,
-        [switch] $NoICMP
+        [switch] $NoICMP,
+        [Amazon.EC2.Model.IpPermission[]] $IpCustomPermissions
     )
     trap {break }
     $ErrorActionPreference = 'Stop'
 
-    Set-DefaultAWSRegion $DefaultRegion
+    Set-DefaultAWSRegion $Region
 
     if ($SourceIPRange -eq $null)
     {
         $bytes = (Invoke-WebRequest 'http://checkip.amazonaws.com/').Content
-        $SourceIPRange = @([System.Text.Encoding]::Ascii.GetString($bytes).Trim() + "/32")
+        $SourceIPRange = @(([System.Text.Encoding]::Ascii.GetString($bytes).Trim() + "/32"), "172.31.0.0/16")
     }
     else
     {
@@ -670,6 +812,7 @@ function Update-WinEC2FireWallSource
 # non-zero exit value for the process is considered as a failure
 function wait ([ScriptBlock] $Cmd, [string] $Message, [int] $RetrySeconds)
 {
+    $_wait_activity = "Waiting for $Message to succeed"
     $_wait_t1 = Get-Date
     $_wait_timeout = $false
     while ($true)
@@ -698,11 +841,11 @@ function wait ([ScriptBlock] $Cmd, [string] $Message, [int] $RetrySeconds)
             break
         }
         $_wait_seconds = [int]($_wait_t2 - $_wait_t1).TotalSeconds
-        Write-Progress -Activity $Message -PercentComplete (100.0*$_wait_seconds/$RetrySeconds) `
+        Write-Progress -Activity $_wait_activity -PercentComplete (100.0*$_wait_seconds/$RetrySeconds) `
             -Status "$_wait_seconds Seconds, will try for $RetrySeconds seconds before timeout"
         Sleep -Seconds 15
     }
-    Write-Progress -Activity $Message -Completed
+    Write-Progress -Activity $_wait_activity -Completed
     if ($_wait_timeout)
     {
         Write-Verbose "$_wait_t2 $Message [$([int]($_wait_t2-$_wait_t1).TotalSeconds) Seconds - Timeout]"
@@ -710,6 +853,6 @@ function wait ([ScriptBlock] $Cmd, [string] $Message, [int] $RetrySeconds)
     }
     else
     {
-        Write-Verbose "$_wait_t2 $Message [$([int]($_wait_t2-$_wait_t1).TotalSeconds) Seconds]"
+        Write-Verbose "$_wait_t2 Succeeded $Message in $([int]($_wait_t2-$_wait_t1).TotalSeconds) Seconds."
     }
 }
