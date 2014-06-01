@@ -44,7 +44,9 @@ function New-WinEC2Instance
 {
     param (
         [string]$InstanceType = 'm3.medium',
-        [string]$ImagePrefix = 'Windows_Server-2012-RTM-English-64Bit-Base', # Windows_Server-2012-RTM-English-64Bit-SQL_2012_SP1_Standard-2014.05.14
+        [string]$ImagePrefix = 'Windows_Server-2012-RTM-English-64Bit-Base', 
+            # Windows_Server-2012-RTM-English-64Bit-SQL_2012_SP1_Standard-2014.05.14
+            # Windows_Server-2012-R2_RTM-English-64Bit-Base
         [string]$Region = $DefaultRegion,
         [string]$Password = $null, # if the password is already baked in the image, specify the password
         [string]$NewPassword = $null, # change the passowrd to this new value
@@ -264,22 +266,30 @@ function findInstance ([Parameter (Position=1, Mandatory=$true)]$nameOrInstanceI
 }
 
 function Stop-WinEC2Instance (
-        [Parameter (Position=1, Mandatory=$true)]$NameOrInstanceId,
+        [Parameter (Position=1, Mandatory=$true)]$NameOrInstanceIds,
         [Parameter(Position=2)]$Region=$DefaultRegion
     )
 {
     trap { break }
     $ErrorActionPreference = 'Stop'
     Set-DefaultAWSRegion $Region
-    Write-Verbose "Stop-WinEC2Instance - NameOrInstanceId=$NameOrInstanceId, Region=$Region"
+    Write-Verbose "Stop-WinEC2Instance - NameOrInstanceIds=$NameOrInstanceIds, Region=$Region"
 
-    $instance = findInstance $NameOrInstanceId 'running'
-    $InstanceId = $instance.InstanceId
+    if ($NameOrInstanceIds -eq '*')
+    {
+        $NameOrInstanceIds = (Get-WinEC2Instance | ? {$_.State -eq 'running'}).InstanceId
+    }
 
-    $a = Stop-EC2Instance -Instance $InstanceId -Force
+    foreach ($NameOrInstanceId in $NameOrInstanceIds)
+    {
+        $instance = findInstance $NameOrInstanceId 'running'
+        $InstanceId = $instance.InstanceId
 
-    $cmd = { (Get-EC2Instance -Instance $InstanceId).Instances[0].State.Name -eq "Stopped" }
-    $a = Wait $cmd "Stop-WinEC2Instance - Stopped state" 450
+        $a = Stop-EC2Instance -Instance $InstanceId -Force
+
+        $cmd = { (Get-EC2Instance -Instance $InstanceId).Instances[0].State.Name -eq "Stopped" }
+        $a = Wait $cmd "Stop-WinEC2Instance NameOrInstanceId=$NameOrInstanceId- Stopped state" 450
+    }
 }
 
 
@@ -395,27 +405,30 @@ function Get-WinEC2Instance
 }
 
 function Remove-WinEC2Instance (
-        [Parameter (Position=1, Mandatory=$true)]$NameOrInstanceId,
+        [Parameter (Position=1, Mandatory=$true)]$NameOrInstanceIds,
         [Parameter(Position=2)]$Region=$DefaultRegion
     )
 {
     trap { break }
     $ErrorActionPreference = 'Stop'
     Set-DefaultAWSRegion $Region
-    Write-Verbose "Remove-WinEC2Instance - NameOrInstanceId=$NameOrInstanceId, Region=$Region"
+    Write-Verbose "Remove-WinEC2Instance - NameOrInstanceIds=$NameOrInstanceIds, Region=$Region"
 
-    $instance = findInstance $NameOrInstanceId '!terminated'
-
-    if ($instance.State.Name -eq 'terminated')
+    foreach ($NameOrInstanceId in $NameOrInstanceIds)
     {
-        throw "Remove-WinEC2Instance - NameOrInstanceId=$NameOrInstanceId alrady terminated"
-    }
-    else
-    {
-        $a = Stop-EC2Instance -Instance $instance.InstanceId -Force -Terminate
+        $instance = findInstance $NameOrInstanceId '!terminated'
 
-        $cmd = { $(Get-EC2Instance -Instance $instance.InstanceId).Instances[0].State.Name -eq 'terminated' }
-        $a = Wait $cmd "Remove-WinEC2Instance - terminate state" 450
+        if ($instance.State.Name -eq 'terminated')
+        {
+            throw "Remove-WinEC2Instance - NameOrInstanceId=$NameOrInstanceId alrady terminated"
+        }
+        else
+        {
+            $a = Stop-EC2Instance -Instance $instance.InstanceId -Force -Terminate
+
+            $cmd = { $(Get-EC2Instance -Instance $instance.InstanceId).Instances[0].State.Name -eq 'terminated' }
+            $a = Wait $cmd "Remove-WinEC2Instance NameOrInstanceId=$NameOrInstanceId - terminate state" 450
+        }
     }
 }
 
