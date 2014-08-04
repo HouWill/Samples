@@ -38,9 +38,18 @@
 $VerbosePreference='continue'
 $DefaultRegion = 'us-east-1'
 $DefaultKeypairFolder = 'c:\temp'
+import-module 'C:\Program Files (x86)\AWS Tools\PowerShell\AWSPowerShell\AWSPowerShell.psd1'
 
-# Lanch EC2 Instance and set the new password
+#Timeouts for different options
+$runningTimeOut = 450
+$pingTimeOut = 1200
+$passwordTimeOut = 1200
+$remoteTimeOut = 1200
+$reachabilityCheckTimeOut = 900
+$stopTimeOut = 900
+$terminateTimeOut = 1500
 
+# Launch EC2 Instance and set the new password
 function New-WinEC2Instance
 {
     param (
@@ -171,7 +180,7 @@ $(if ($Name -eq $null) { Restart-Service winrm }
         }
 
         $cmd = { $(Get-EC2Instance -Filter @{Name = "instance-id"; Values = $instanceid}).Instances[0].State.Name -eq "Running" }
-        $a = Wait $cmd "New-WinEC2Instance - running state" 450
+        $a = Wait $cmd "New-WinEC2Instance - running state" $runningTimeOut
         $runningTime = Get-Date
         
         #Wait for ping to succeed
@@ -179,7 +188,7 @@ $(if ($Name -eq $null) { Restart-Service winrm }
         $publicDNS = $a.Instances[0].PublicDnsName
 
         $cmd = { ping $publicDNS; $LASTEXITCODE -eq 0}
-        $a = Wait $cmd "New-WinEC2Instance - ping" 600
+        $a = Wait $cmd "New-WinEC2Instance - ping" $pingTimeOut
         $pingTime = Get-Date
 
         #Wait until the password is available
@@ -187,7 +196,7 @@ $(if ($Name -eq $null) { Restart-Service winrm }
         {
             $keyfile = Get-WinEC2KeyFile $KeyPairName
             $cmd = {Get-EC2PasswordData -InstanceId $instanceid -PemFile $keyfile -Decrypt}
-            $Password = Wait $cmd "New-WinEC2Instance - retreive password" 600
+            $Password = Wait $cmd "New-WinEC2Instance - retreive password" $passwordTimeOut
         }
 
         Write-Verbose "$Password $publicDNS"
@@ -197,7 +206,7 @@ $(if ($Name -eq $null) { Restart-Service winrm }
         $passwordTime = Get-Date
     
         $cmd = {New-PSSession $publicDNS -Credential $creds -Port 80}
-        $s = Wait $cmd "New-WinEC2Instance - remote connection" 600
+        $s = Wait $cmd "New-WinEC2Instance - remote connection" $remoteTimeOut
 
         if ($NewPassword)
         {
@@ -366,7 +375,7 @@ function Stop-WinEC2Instance (
         $a = Stop-EC2Instance -Instance $InstanceId -Force
 
         $cmd = { (Get-EC2Instance -Instance $InstanceId).Instances[0].State.Name -eq "Stopped" }
-        $a = Wait $cmd "Stop-WinEC2Instance InstanceId=$InstanceId- Stopped state" 450
+        $a = Wait $cmd "Stop-WinEC2Instance InstanceId=$InstanceId- Stopped state" $stopTimeOut
     }
 }
 
@@ -394,7 +403,7 @@ function Start-WinEC2Instance (
         $a = Start-EC2Instance -Instance $InstanceId
 
         $cmd = { $(Get-EC2Instance -Instance $InstanceId).Instances[0].State.Name -eq "running" }
-        $a = Wait $cmd "Start-WinEC2Instance - running state" 450
+        $a = Wait $cmd "Start-WinEC2Instance - running state" $runningTimeOut
 
         #Wait for ping to succeed
         $instance = (Get-EC2Instance -Instance $InstanceId).Instances[0]
@@ -403,16 +412,16 @@ function Start-WinEC2Instance (
         Write-Verbose "publicDNS = $($instance.PublicDnsName)"
 
         $cmd = { ping  $publicDNS; $LASTEXITCODE -eq 0}
-        $a = Wait $cmd "Start-WinEC2Instance - ping" 450
+        $a = Wait $cmd "Start-WinEC2Instance - ping" $pingTimeOut
 
         $cmd = {New-PSSession $publicDNS -Credential $Cred -Port 80}
-        $s = Wait $cmd "Start-WinEC2Instance - Remote connection" 300
+        $s = Wait $cmd "Start-WinEC2Instance - Remote connection" $remoteTimeOut
         Remove-PSSession $s
 
         if ($IsReachabilityCheck)
         {
             $cmd = { $(Get-EC2InstanceStatus $InstanceId).Status.Status -eq 'ok'}
-            $a = Wait $cmd "Start-WinEC2Instance - Reachabilitycheck" 600
+            $a = Wait $cmd "Start-WinEC2Instance - Reachabilitycheck" $reachabilityCheckTimeOut
         }
 
         Write-Verbose ('Start-WinEC2Instance - {0:mm}:{0:ss} - to start' -f ((Get-Date) - $startTime))
@@ -442,18 +451,18 @@ function ReStart-WinEC2Instance (
 
         #Wait for ping to fail
         $cmd = { ping  $publicDNS; $LASTEXITCODE -ne 0}
-        $a = Wait $cmd "ReStart-WinEC2Instance - ping to fail" 450
+        $a = Wait $cmd "ReStart-WinEC2Instance - ping to fail" $pingTimeOut
 
         #Wait for ping to succeed
         $cmd = { ping  $publicDNS; $LASTEXITCODE -eq 0}
-        $a = Wait $cmd "ReStart-WinEC2Instance - ping to succeed" 450
+        $a = Wait $cmd "ReStart-WinEC2Instance - ping to succeed" $pingTimeOut
 
         $cmd = {New-PSSession $publicDNS -Credential $Cred -Port 80}
-        $s = Wait $cmd "ReStart-WinEC2Instance - Remote connection" 300
+        $s = Wait $cmd "ReStart-WinEC2Instance - Remote connection" $remoteTimeOut
         Remove-PSSession $s
 
         $cmd = { $(Get-EC2InstanceStatus $InstanceId).Status.Status -eq 'ok'}
-        $a = Wait $cmd "Start-WinEC2Instance - Reachabilitycheck" 600
+        $a = Wait $cmd "Start-WinEC2Instance - Reachabilitycheck" $reachabilityCheckTimeOut
 
         Write-Verbose ('ReStart-WinEC2Instance - {0:mm}:{0:ss} - to restart' -f ((Get-Date) - $startTime))
     }
@@ -500,6 +509,10 @@ function Get-WinEC2Instance
         [Parameter(Position=2)][string]$DesiredState = 'running',
         [Parameter(Position=3)][string]$Region=$DefaultRegion
     )
+    trap { break }
+    $ErrorActionPreference = 'Stop'
+    Set-DefaultAWSRegion $Region
+    Write-Verbose "ReStart-WinEC2Instance - NameOrInstanceId=$NameOrInstanceIds, Region=$Region"
 
     $instances = findInstance -nameOrInstanceIds $NameOrInstanceIds -desiredState $DesiredState
     foreach ($instance in $instances)
@@ -525,7 +538,7 @@ function Remove-WinEC2Instance (
         $a = Stop-EC2Instance -Instance $instance.InstanceId -Force -Terminate
 
         $cmd = { $(Get-EC2Instance -Instance $instance.InstanceId).Instances[0].State.Name -eq 'terminated' }
-        $a = Wait $cmd "Remove-WinEC2Instance NameOrInstanceId=$($instance.InstanceId) - terminate state" 1500
+        $a = Wait $cmd "Remove-WinEC2Instance NameOrInstanceId=$($instance.InstanceId) - terminate state" $terminateTimeOut
     }
 }
 

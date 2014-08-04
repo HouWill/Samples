@@ -1,6 +1,7 @@
 ﻿function WinEC2LoopRunOne
 {
     param ($file, $count, $retryCount, [Hashtable]$parameterSet)
+    $failures = 0
 
     function log ([string]$st)
     {
@@ -19,15 +20,15 @@
     del $logfile -ea 0
     del $file -ea 0
 
-    'New Parameter Set'>> $file
-
+    $paramstring = ''
     foreach ($key in $parameterSet.Keys)
     {
         $value = $parameterSet[$key]
-        "    $key=$value">> $file
+        $paramstring += "`t$key=$value"
     }
 
     "Count`tRunning`tPing`tPassword`tRemote" >> $file
+
     $sumRunning = $sumPing = $sumPassword = $sumRemote =0
     $sumcount = 0
     for($i=0; $i -lt $Count; )
@@ -40,22 +41,28 @@
             $sumPassword += $a.Time.Password
             $sumRemote += $a.Time.Remote
             $sumcount++
-            "$i`t$($a.Time.Running)`t$($a.Time.Ping)`t$($a.Time.Password)`t$($a.Time.Remote)" >> $file
+
+            $stRunning = "{0:mm\:ss}" -f $a.Time.Running
+            $stPing = "{0:mm\:ss}" -f $a.Time.Ping
+            $stPassword = "{0:mm\:ss}" -f $a.Time.Password
+            $stRemote = "{0:mm\:ss}" -f $a.Time.Remote
+
+            "$i`t$stRunning`t$stPing`t$stPassword`t$stRemote`tFailures=$failures$paramstring" >> $file
             $i++
-            log "Number=$i, Retries left=$RetryCount New-WinEC2Instance $($a.instanceid) completed"
+            log "Number=$i, Failures=$failures Max retry=$RetryCount New-WinEC2Instance $($a.instanceid) completed"
             Remove-WinEC2Instance $a.instanceid 
             log "Remove-WinEC2Instance $($a.instanceid) completed"
             $a = $null
         }
         catch
         {
-            $retryCount--
+            $failures++
             logexception $_.Exception
-            log "Retries left = $RetryCount, Instanceid=$($a.instanceid)"
+            log "Failures=$failures Max retry=$RetryCount, Instanceid=$($a.instanceid)"
         }
-        if ($retryCount -le 0)
+        if ($failures -ge $retryCount)
         {
-            log "Max retry reached, so will exit now"
+            log "Max retry reached (RetrCount=$RetryCount), so will exit now"
             break
         }
     }
@@ -66,6 +73,6 @@
         $sumPing = New-TimeSpan -Seconds ($sumPing.TotalSeconds/$sumcount)
         $sumPassword = New-TimeSpan -Seconds ($sumPassword.TotalSeconds/$sumcount)
         $sumRemote = New-TimeSpan -Seconds ($sumRemote.TotalSeconds/$sumcount)
-        "SUM`t$sumRunning`t$sumPing`t$sumPassword`t$sumRemote" >> $file
+        "SUM`t$sumRunning`t$sumPing`t$sumPassword`t$sumRemote`tFailures=$failures$paramstring" >> $file
     }
 }
