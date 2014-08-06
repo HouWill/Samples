@@ -6,6 +6,8 @@ $RetryCount = 10
 $fileprefix = 'c:\temp\x'
 $processTrottle = 4
 
+Write-Verbose "Count=$Count, RetryCount=$RetryCount, fileprefix=$fileprefix, processTrottle=$processTrottle"
+
 [Hashtable[]]$parameterSets = @(
     @{
     }
@@ -78,6 +80,7 @@ foreach ($parameterSet in $parameterSets)
     "WinEC2LoopRunOne -file `"$csvfile`" -count $Count -retryCount $RetryCount -parameterSet `$parameters" >> $ps1file
 }
 
+Write-Verbose "Generated $i files ($fileprefix*)"
 
 $proceslist = ,0*$processTrottle
 
@@ -94,6 +97,7 @@ while ($continue)
             $ps1file = $ps1files[0]
             $ps1files.RemoveAt(0)
             $proceslist[$j] = Start-Process "$PSHOME\PowerShell.exe" -ArgumentList "-f `"$ps1file`"" -PassThru
+            Write-Verbose "Started $ps1file ProcessId=$($proceslist[$j].id), Remaining=$($ps1files.Count)"
         }
         elseif ($proceslist[$j] -ne 0) 
         {
@@ -101,6 +105,7 @@ while ($continue)
             try
             {
                 Wait-process -id $proceslist[$j].Id -Timeout 1
+                Write-Verbose "Completed ProcessId=$($proceslist[$j].id)"
                 $proceslist[$j] = 0
             }
             catch
@@ -121,7 +126,6 @@ for ($j = 1; $j -le $i; $j++)
     $csvfile = "$($fileprefix)$($j).csv"
     if (Test-Path $csvfile)
     {
-        "" >> $consolidatedfile
         $csvfile >> $consolidatedfile
         cat $csvfile >> $consolidatedfile
     }
