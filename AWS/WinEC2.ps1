@@ -38,25 +38,16 @@
 $VerbosePreference='continue'
 $DefaultRegion = 'us-east-1'
 $DefaultKeypairFolder = 'c:\temp'
-import-module 'C:\Program Files (x86)\AWS Tools\PowerShell\AWSPowerShell\AWSPowerShell.psd1'
 
-#Timeouts for different options
-$runningTimeOut = 450
-$pingTimeOut = 1200
-$passwordTimeOut = 1200
-$remoteTimeOut = 1200
-$reachabilityCheckTimeOut = 900
-$stopTimeOut = 900
-$terminateTimeOut = 1500
+# Lanch EC2 Instance and set the new password
 
-# Launch EC2 Instance and set the new password
 function New-WinEC2Instance
 {
     param (
         [string]$InstanceType = 't2.medium',
-        [string]$ImagePrefix = 'Windows_Server-2012-R2_RTM-English-64Bit-GP2-', 
+        [string]$ImagePrefix = 'Windows_Server-2012-R2_RTM-English-64Bit-Base',
+            #'Windows_Server-2012-R2_RTM-English-64Bit-GP2-', 
             # Windows_Server-2008-R2_SP1-English-64Bit-Base
-            # Windows_Server-2012-R2_RTM-English-64Bit-Base
             # Windows_Server-2012-RTM-English-64Bit-SQL_2012_SP1_Standard
             # Windows_Server-2012-RTM-English-64Bit-Base
         [string]$Region = $DefaultRegion,
@@ -67,7 +58,7 @@ function New-WinEC2Instance
         [string]$Name = $null,
         [string]$PrivateIPAddress = $null,
         [int32]$IOPS = 0,
-        [switch]$gp2,
+        [string]$volumetype = 'standard',
         [switch]$DontCleanUp, # Don't cleanup EC2 instance on error
         [string]$Placement_AvailabilityZone = $null
         )
@@ -137,29 +128,26 @@ $(if ($Name -eq $null) { Restart-Service winrm }
             }
         }
 
-        if ($gp2 -or $IOPS -gt 0)
-        {
-            $Volume = New-Object Amazon.EC2.Model.EbsBlockDevice
-            $Volume.DeleteOnTermination = $True
-            $Volume.VolumeSize = 30
+        $Volume = New-Object Amazon.EC2.Model.EbsBlockDevice
+        $Volume.DeleteOnTermination = $True
+        $Volume.VolumeSize = 30
         
-            if ($gp2)
-            {
-                $Volume.VolumeType = 'gp2'
-            }
-            else
-            {
-                $Volume.VolumeType = 'io1'
-                $volume.IOPS = $IOPS
-                $parameters.'EbsOptimized' = $True
-            }
-
-            $Mapping = New-Object Amazon.EC2.Model.BlockDeviceMapping
-            $Mapping.DeviceName = '/dev/sda1'
-            $Mapping.Ebs = $Volume
-
-            $parameters.'BlockDeviceMapping' = $Mapping
+        if ($IOPS -eq 0)
+        {
+            $Volume.VolumeType = $volumetype
         }
+        else
+        {
+            $Volume.VolumeType = 'io1'
+            $volume.IOPS = $IOPS
+            $parameters.'EbsOptimized' = $True
+        }
+
+        $Mapping = New-Object Amazon.EC2.Model.BlockDeviceMapping
+        $Mapping.DeviceName = '/dev/sda1'
+        $Mapping.Ebs = $Volume
+
+        $parameters.'BlockDeviceMapping' = $Mapping
 
         $startTime = Get-Date
         $a = New-EC2Instance @parameters
@@ -180,7 +168,7 @@ $(if ($Name -eq $null) { Restart-Service winrm }
         }
 
         $cmd = { $(Get-EC2Instance -Filter @{Name = "instance-id"; Values = $instanceid}).Instances[0].State.Name -eq "Running" }
-        $a = Wait $cmd "New-WinEC2Instance - running state" $runningTimeOut
+        $a = Wait $cmd "New-WinEC2Instance - running state" 450
         $runningTime = Get-Date
         
         #Wait for ping to succeed
@@ -188,7 +176,7 @@ $(if ($Name -eq $null) { Restart-Service winrm }
         $publicDNS = $a.Instances[0].PublicDnsName
 
         $cmd = { ping $publicDNS; $LASTEXITCODE -eq 0}
-        $a = Wait $cmd "New-WinEC2Instance - ping" $pingTimeOut
+        $a = Wait $cmd "New-WinEC2Instance - ping" 600
         $pingTime = Get-Date
 
         #Wait until the password is available
@@ -196,7 +184,7 @@ $(if ($Name -eq $null) { Restart-Service winrm }
         {
             $keyfile = Get-WinEC2KeyFile $KeyPairName
             $cmd = {Get-EC2PasswordData -InstanceId $instanceid -PemFile $keyfile -Decrypt}
-            $Password = Wait $cmd "New-WinEC2Instance - retreive password" $passwordTimeOut
+            $Password = Wait $cmd "New-WinEC2Instance - retreive password" 600
         }
 
         Write-Verbose "$Password $publicDNS"
@@ -206,7 +194,7 @@ $(if ($Name -eq $null) { Restart-Service winrm }
         $passwordTime = Get-Date
     
         $cmd = {New-PSSession $publicDNS -Credential $creds -Port 80}
-        $s = Wait $cmd "New-WinEC2Instance - remote connection" $remoteTimeOut
+        $s = Wait $cmd "New-WinEC2Instance - remote connection" 600
 
         if ($NewPassword)
         {
@@ -375,7 +363,7 @@ function Stop-WinEC2Instance (
         $a = Stop-EC2Instance -Instance $InstanceId -Force
 
         $cmd = { (Get-EC2Instance -Instance $InstanceId).Instances[0].State.Name -eq "Stopped" }
-        $a = Wait $cmd "Stop-WinEC2Instance InstanceId=$InstanceId- Stopped state" $stopTimeOut
+        $a = Wait $cmd "Stop-WinEC2Instance InstanceId=$InstanceId- Stopped state" 450
     }
 }
 
@@ -403,7 +391,7 @@ function Start-WinEC2Instance (
         $a = Start-EC2Instance -Instance $InstanceId
 
         $cmd = { $(Get-EC2Instance -Instance $InstanceId).Instances[0].State.Name -eq "running" }
-        $a = Wait $cmd "Start-WinEC2Instance - running state" $runningTimeOut
+        $a = Wait $cmd "Start-WinEC2Instance - running state" 450
 
         #Wait for ping to succeed
         $instance = (Get-EC2Instance -Instance $InstanceId).Instances[0]
@@ -412,16 +400,16 @@ function Start-WinEC2Instance (
         Write-Verbose "publicDNS = $($instance.PublicDnsName)"
 
         $cmd = { ping  $publicDNS; $LASTEXITCODE -eq 0}
-        $a = Wait $cmd "Start-WinEC2Instance - ping" $pingTimeOut
+        $a = Wait $cmd "Start-WinEC2Instance - ping" 450
 
         $cmd = {New-PSSession $publicDNS -Credential $Cred -Port 80}
-        $s = Wait $cmd "Start-WinEC2Instance - Remote connection" $remoteTimeOut
+        $s = Wait $cmd "Start-WinEC2Instance - Remote connection" 300
         Remove-PSSession $s
 
         if ($IsReachabilityCheck)
         {
             $cmd = { $(Get-EC2InstanceStatus $InstanceId).Status.Status -eq 'ok'}
-            $a = Wait $cmd "Start-WinEC2Instance - Reachabilitycheck" $reachabilityCheckTimeOut
+            $a = Wait $cmd "Start-WinEC2Instance - Reachabilitycheck" 600
         }
 
         Write-Verbose ('Start-WinEC2Instance - {0:mm}:{0:ss} - to start' -f ((Get-Date) - $startTime))
@@ -451,18 +439,18 @@ function ReStart-WinEC2Instance (
 
         #Wait for ping to fail
         $cmd = { ping  $publicDNS; $LASTEXITCODE -ne 0}
-        $a = Wait $cmd "ReStart-WinEC2Instance - ping to fail" $pingTimeOut
+        $a = Wait $cmd "ReStart-WinEC2Instance - ping to fail" 450
 
         #Wait for ping to succeed
         $cmd = { ping  $publicDNS; $LASTEXITCODE -eq 0}
-        $a = Wait $cmd "ReStart-WinEC2Instance - ping to succeed" $pingTimeOut
+        $a = Wait $cmd "ReStart-WinEC2Instance - ping to succeed" 450
 
         $cmd = {New-PSSession $publicDNS -Credential $Cred -Port 80}
-        $s = Wait $cmd "ReStart-WinEC2Instance - Remote connection" $remoteTimeOut
+        $s = Wait $cmd "ReStart-WinEC2Instance - Remote connection" 300
         Remove-PSSession $s
 
         $cmd = { $(Get-EC2InstanceStatus $InstanceId).Status.Status -eq 'ok'}
-        $a = Wait $cmd "Start-WinEC2Instance - Reachabilitycheck" $reachabilityCheckTimeOut
+        $a = Wait $cmd "Start-WinEC2Instance - Reachabilitycheck" 600
 
         Write-Verbose ('ReStart-WinEC2Instance - {0:mm}:{0:ss} - to restart' -f ((Get-Date) - $startTime))
     }
@@ -509,10 +497,6 @@ function Get-WinEC2Instance
         [Parameter(Position=2)][string]$DesiredState = 'running',
         [Parameter(Position=3)][string]$Region=$DefaultRegion
     )
-    trap { break }
-    $ErrorActionPreference = 'Stop'
-    Set-DefaultAWSRegion $Region
-    Write-Verbose "ReStart-WinEC2Instance - NameOrInstanceId=$NameOrInstanceIds, Region=$Region"
 
     $instances = findInstance -nameOrInstanceIds $NameOrInstanceIds -desiredState $DesiredState
     foreach ($instance in $instances)
@@ -538,7 +522,7 @@ function Remove-WinEC2Instance (
         $a = Stop-EC2Instance -Instance $instance.InstanceId -Force -Terminate
 
         $cmd = { $(Get-EC2Instance -Instance $instance.InstanceId).Instances[0].State.Name -eq 'terminated' }
-        $a = Wait $cmd "Remove-WinEC2Instance NameOrInstanceId=$($instance.InstanceId) - terminate state" $terminateTimeOut
+        $a = Wait $cmd "Remove-WinEC2Instance NameOrInstanceId=$($instance.InstanceId) - terminate state" 1500
     }
 }
 
