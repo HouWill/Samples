@@ -38,7 +38,7 @@
 $VerbosePreference='continue'
 $DefaultRegion = 'us-east-1'
 $DefaultKeypairFolder = 'c:\temp'
-
+import-module 'C:\Program Files (x86)\AWS Tools\PowerShell\AWSPowerShell\AWSPowerShell.psd1'
 # Lanch EC2 Instance and set the new password
 
 function New-WinEC2Instance
@@ -56,6 +56,7 @@ function New-WinEC2Instance
         [string]$SecurityGroupName = 'sg_winec2',
         [string]$KeyPairName = 'winec2keypair',
         [string]$Name = $null,
+        [switch]$RenameComputer, # if set, will rename computer to match with $Name
         [string]$PrivateIPAddress = $null,
         [int32]$IOPS = 0,
         [string]$volumetype = 'standard',
@@ -83,7 +84,6 @@ function New-WinEC2Instance
         $imageid = $a[$a.Length-1].ImageId #get the last one if there are more than one image
         $imagename = $a[$a.Length-1].Name
         Write-Verbose "imageid=$imageid, imagename=$imagename"
-
         #Launch the instance
         $userdata = @"
 <powershell>
@@ -92,11 +92,12 @@ Set-NetFirewallRule -Name WINRM-HTTP-In-TCP-PUBLIC -RemoteAddress Any
 New-NetFirewallRule -Name "WinRM80" -DisplayName "WinRM80" -Protocol TCP -LocalPort 80
 Set-Item WSMan:\localhost\Service\EnableCompatibilityHttpListener -Value true
 #Set-Item (dir wsman:\localhost\Listener\*\Port -Recurse).pspath 80 -Force
-$(if ($Name -eq $null) { Restart-Service winrm }
+$(if ($Name -eq $null -or (-not $RenameComputer)) { 'Restart-Service winrm' }
   else {"Rename-Computer -NewName '$Name';Restart-Computer" }
 )
 </powershell>
 "@
+
         $userdataBase64Encoded = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($userdata))
         $parameters = @{
             ImageId = $imageid
@@ -498,6 +499,7 @@ function Get-WinEC2Instance
         [Parameter(Position=3)][string]$Region=$DefaultRegion
     )
 
+    Set-DefaultAWSRegion $Region
     $instances = findInstance -nameOrInstanceIds $NameOrInstanceIds -desiredState $DesiredState
     foreach ($instance in $instances)
     {
