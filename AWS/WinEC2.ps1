@@ -699,7 +699,6 @@ function Update-WinEC2FireWallSource
         $bytes = (Invoke-WebRequest 'http://checkip.amazonaws.com/').Content
         $SourceIPRange = @(([System.Text.Encoding]::Ascii.GetString($bytes).Trim() + "/32"))
         Write-Verbose "$sourceIPRange retreived from checkip.amazonaws.com"
-#$SourceIPRange = '72.0.0.0/8'
 
         $IpCustomPermissions = @(
             @{IpProtocol = 'tcp'; FromPort = 3389; ToPort = 3389; IpRanges = $SourceIPRange},
@@ -786,143 +785,6 @@ function Update-WinEC2FireWallSource
     Write-Verbose "Update-WinEC2FireWallSource - Updated $SecurityGroupName"
 }
 
-
-# Creates or updates the security group
-# Default it enables RDP, PowerShell, HTTP and ICMP.
-# Define appropriate switch to disable specific protocol
-# If SourceIPRange is not defined, it configures based on http://checkip.amazonaws.com
-function Update-WinEC2FireWallSource2
-{
-    param (
-        $SecurityGroupName = 'sg_winec2',
-        $Region=$DefaultRegion,
-        $SourceIPRange = $null,
-        [switch] $NoRDP,
-        [switch] $NoPS,
-        [switch] $NoHTTP,
-        [switch] $NoICMP,
-        [Amazon.EC2.Model.IpPermission[]] $IpCustomPermissions
-    )
-    trap {break }
-    $ErrorActionPreference = 'Stop'
-
-    Set-DefaultAWSRegion $Region
-
-    if ($SourceIPRange -eq $null)
-    {
-        $bytes = (Invoke-WebRequest 'http://checkip.amazonaws.com/').Content
-        $SourceIPRange = @(([System.Text.Encoding]::Ascii.GetString($bytes).Trim() + "/32"), "172.31.0.0/16")
-    }
-    else
-    {
-        $SourceIPRange = @($SourceIPRange) #Make it an array, if not already
-    }
-
-    $sg = Get-EC2SecurityGroup | ? { $_.GroupName -eq $SecurityGroupName}
-    if ($sg -eq $null)
-    {
-        #Create the firewall security group
-        $groupid = New-EC2SecurityGroup $SecurityGroupName  -Description "Enables rdp, ps, http and icmp"
-    }
-    else
-    {
-    
-        foreach ($ipPermission in $sg.IpPermissions)
-        {
-            $delete = $true # will be set to false if we find exact match 
-
-            if ($ipPermission.IpProtocol -eq 'tcp' -and 
-                $ipPermission.FromPort -eq 3389 -and $ipPermission.ToPort -eq 3389)
-            {
-                if (-not $NoRDP)
-                {
-                    $delete = $false
-                    $NoRDP = $true # Already defined don't have to create it again.
-                }
-            }
-            if ($ipPermission.IpProtocol -eq 'tcp' -and 
-                $ipPermission.FromPort -eq 5985 -and $ipPermission.ToPort -eq 5985)
-            {
-                if (-not $NoPS)
-                {
-                    $delete = $false
-                    $NoPS = $true # Already defined don't have to create it again.
-                }
-            }
-            if ($ipPermission.IpProtocol -eq 'tcp' -and 
-                $ipPermission.FromPort -eq 80 -and $ipPermission.ToPort -eq 80)
-            {
-                if (-not $NoHTTP)
-                {
-                    $delete = $false
-                    $NoHTTP = $true # Already defined don't have to create it again.
-                }
-            }
-            if ($ipPermission.IpProtocol -eq 'icmp' -and 
-                $ipPermission.FromPort -eq -1 -and $ipPermission.ToPort -eq -1)
-            {
-                if (-not $NoICMP)
-                {
-                    $delete = $false
-                    $NoICMP = $true # Already defined don't have to create it again.
-                }
-            }
-
-            $update = $false
-            if ($ipPermission.IpRanges.Count -ne $SourceIPRange.Count)
-            {
-                $update = $true
-            }
-            else
-            {
-                foreach ($sourceIP in $SourceIPRange)
-                {
-                    if (-not $ipPermission.IpRanges.Contains($sourceIP))
-                    {
-                        $update = $true
-                        break
-                    }
-                }
-            }
-
-            if ($delete -or $update)
-            {
-                Revoke-EC2SecurityGroupIngress -GroupName $SecurityGroupName `
-                    -IpPermissions $ipPermission
-                if (-not $delete)
-                {
-                    $ipPermission.IpRanges = $SourceIPRange
-                    Grant-EC2SecurityGroupIngress -GroupName $SecurityGroupName `
-                        -IpPermissions $ipPermission
-                }
-            }
-        }
-    }
-
-    if (-not $NoRDP)
-    {
-        Grant-EC2SecurityGroupIngress -GroupName $SecurityGroupName -IpPermissions `
-          @{IpProtocol = 'tcp'; FromPort = 3389; ToPort = 3389; IpRanges = $SourceIPRange}
-    }
-    if (-not $NoPS)
-    {
-        Grant-EC2SecurityGroupIngress -GroupName $SecurityGroupName -IpPermissions `
-          @{IpProtocol = 'tcp'; FromPort = 5985; ToPort = 5986; IpRanges = $SourceIPRange}
-    }
-    if (-not $NoHTTP)
-    {
-        Grant-EC2SecurityGroupIngress -GroupName $SecurityGroupName -IpPermissions `
-          @{IpProtocol = 'tcp'; FromPort = 80; ToPort = 80; IpRanges = $SourceIPRange}
-    }
-    if (-not $NoICMP)
-    {
-        Grant-EC2SecurityGroupIngress -GroupName $SecurityGroupName -IpPermissions `
-          @{IpProtocol = 'icmp'; FromPort = -1; ToPort = -1; IpRanges = $SourceIPRange}
-    }
-
-    Write-Verbose "Updated $SecurityGroupName IpRange to $SourceIPRange"
-}
-
 # local variables has _wait_ prefix to avoid potential conflict in ScriptBlock
 # Retry the scriptblock $cmd until no error and return true
 function wait ([ScriptBlock] $Cmd, [string] $Message, [int] $RetrySeconds)
@@ -934,7 +796,7 @@ function wait ([ScriptBlock] $Cmd, [string] $Message, [int] $RetrySeconds)
     {
         try
         {
-            $_wait_success = false
+            $_wait_success = $false
             $_wait_result = & $cmd 2>$null | select -Last 1 
             if ($? -and $_wait_result)
             {
