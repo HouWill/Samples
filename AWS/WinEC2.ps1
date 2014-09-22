@@ -66,6 +66,7 @@ function New-WinEC2Instance
 
     trap { break } #This stops execution on any exception
     $ErrorActionPreference = 'Stop'
+
     Set-DefaultAWSRegion $Region
     Write-Verbose ("New-WinEC2Instance InstanceType=$InstanceType, ImagePrefix=$ImagePrefix,Region=$Region, " +
             "SecurityGroupName=$SecurityGroupName, Name=$Name,PrivateIPAddress=$PrivateIPAddress, " +
@@ -346,6 +347,27 @@ function Get-WinEC2Password (
     }
 }
 
+function Invoke-WinEC2Command (
+        [Parameter (Position=1, Mandatory=$true)][string]$NameOrInstanceIds,
+        [Parameter(Position=2, Mandatory=$true)][ScriptBlock]$sb,
+        [Parameter(Position=3)][PSCredential]$credential=$cred,
+        [Parameter(Position=4)][string]$Region=$DefaultRegion
+    )
+{
+    trap { break }
+    $ErrorActionPreference = 'Stop'
+    Set-DefaultAWSRegion $Region
+    Write-Verbose "Invoke-WinEC2Command - NameOrInstanceIds=$NameOrInstanceIds, ScriptBlock=$sb, Region=$Region"
+
+    $instances = findInstance $NameOrInstanceIds 'running'
+    foreach ($instance in $instances)
+    {
+        Invoke-Command -ComputerName $instance.PublicIpAddress -Port 80 -Credential $credential -ScriptBlock $sb
+    }
+}
+
+
+
 function Stop-WinEC2Instance (
         [Parameter (Position=1, Mandatory=$true)][string]$NameOrInstanceIds,
         [Parameter(Position=2)][string]$Region=$DefaultRegion
@@ -481,6 +503,7 @@ function getWinInstanceFromEC2Instance ($instance)
     $obj | Add-Member -NotePropertyName 'NetworkInterfaces' -NotePropertyValue $instance.NetworkInterfaces
     $obj | Add-Member -NotePropertyName 'InstanceType' -NotePropertyValue $instance.InstanceType
     $obj | Add-Member -NotePropertyName 'KeyName' -NotePropertyValue $instance.KeyName
+    $obj | Add-Member -NotePropertyName 'ImageId' -NotePropertyValue $instance.ImageId
     $obj | Add-Member -NotePropertyName 'Instance' -NotePropertyValue $instance
 
     foreach ($tag in $instance.Tag)
@@ -820,17 +843,22 @@ function wait ([ScriptBlock] $Cmd, [string] $Message, [int] $RetrySeconds)
         $_wait_seconds = [int]($_wait_t2 - $_wait_t1).TotalSeconds
         Write-Progress -Activity $_wait_activity `
             -PercentComplete (100.0*$_wait_seconds/$RetrySeconds) `
-            -Status "$_wait_seconds Seconds, will try for $RetrySeconds seconds before timeout"
-        Sleep -Seconds 15
+            -Status "$_wait_seconds Seconds, will try for $RetrySeconds seconds before timeout, Current result=$_wait_result"
+        Sleep -Seconds 5
     }
     Write-Progress -Activity $_wait_activity -Completed
     if ($_wait_timeout)
     {
-        Write-Verbose "$_wait_t2 $Message [$([int]($_wait_t2-$_wait_t1).TotalSeconds) Seconds - Timeout]"
-        throw "Timeout - $Message after $RetrySeconds seconds"
+        Write-Verbose "$_wait_t2 $Message [$([int]($_wait_t2-$_wait_t1).TotalSeconds) Seconds - Timeout], Current result=$_wait_result"
+        throw "Timeout - $Message after $RetrySeconds seconds, Current result=$_wait_result"
     }
     else
     {
         Write-Verbose "$_wait_t2 Succeeded $Message in $([int]($_wait_t2-$_wait_t1).TotalSeconds) Seconds."
     }
 }
+
+New-Alias cwin Connect-WinEC2Instance
+New-Alias nwin New-WinEC2Instance
+New-Alias rwin Remove-WinEC2Instance
+New-Alias icmwin Invoke-WinEC2Command
