@@ -131,7 +131,7 @@ $(if ($Name -eq $null -or (-not $RenameComputer)) { 'Restart-Service winrm' }
 
         $Volume = New-Object Amazon.EC2.Model.EbsBlockDevice
         $Volume.DeleteOnTermination = $True
-        $Volume.VolumeSize = 30
+        #$Volume.VolumeSize = 30
         
         if ($IOPS -eq 0)
         {
