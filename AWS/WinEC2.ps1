@@ -41,6 +41,29 @@ $DefaultKeypairFolder = 'c:\temp'
 import-module 'C:\Program Files (x86)\AWS Tools\PowerShell\AWSPowerShell\AWSPowerShell.psd1'
 # Lanch EC2 Instance and set the new password
 
+function RetryOnError ($scriptBlock, $retryCount = 3)
+{
+    for ($i=1; $i -le $retryCount; $i++)
+    {
+        try
+        {
+            $a = . $scriptBlock
+            $a
+            break
+        }
+        catch
+        {
+            Write-Host "Error: $($_.Exception.Message), RetryCount=$i, ScriptBlock=$scriptBlock" -ForegroundColor Yellow
+            Write-Host $a
+            if ($i -eq $retryCount)
+            {
+                throw $_.Execption
+            }
+            Sleep 10 # wait before retrying
+        }
+    }
+}
+
 function New-WinEC2Instance
 {
     param (
@@ -165,7 +188,7 @@ $(if ($Name -eq $null -or (-not $RenameComputer)) { 'Restart-Service winrm' }
 
         if ($Name)
         {
-            New-EC2Tag -ResourceId $instanceid -Tag @{Key='Name'; Value=$Name}
+            RetryOnError {New-EC2Tag -ResourceId $instanceid -Tag @{Key='Name'; Value=$Name}}
         }
 
         $cmd = { $(Get-EC2Instance -Filter @{Name = "instance-id"; Values = $instanceid}).Instances[0].State.Name -eq "Running" }
@@ -206,7 +229,7 @@ $(if ($Name -eq $null -or (-not $RenameComputer)) { 'Restart-Service winrm' }
         
             try
             {
-                Invoke-Command -Session $s $cmd -ArgumentList $NewPassword 2>$null
+                $null = Invoke-Command -Session $s $cmd -ArgumentList $NewPassword 2>$null
             }
             catch # sometime it gives access denied error. ok to mask this error, the next connect will fail if there is an issue.
             {
@@ -238,9 +261,11 @@ $(if ($Name -eq $null -or (-not $RenameComputer)) { 'Restart-Service winrm' }
     }
     catch
     {
+        Write-Warning "Error: $($_.Exception.Message)"
         if ($instanceid -ne $null -and (-not $DontCleanUp))
         {
-            Stop-EC2Instance -Instance $instanceid -Force -Terminate
+            Write-Verbose "Terminate InstanceId=$instanceid"
+            $null = Stop-EC2Instance -Instance $instanceid -Force -Terminate
         }
         throw $_.Exception
     }
@@ -814,6 +839,7 @@ function wait ([ScriptBlock] $Cmd, [string] $Message, [int] $RetrySeconds)
     $_wait_activity = "Waiting for $Message to succeed"
     $_wait_t1 = Get-Date
     $_wait_timeout = $false
+    Write-Verbose "$_wait_t1 Wait for $Message to succeed in $RetrySeconds seconds"
     while ($true)
     {
         try
@@ -857,7 +883,7 @@ function wait ([ScriptBlock] $Cmd, [string] $Message, [int] $RetrySeconds)
     }
 }
 
-New-Alias cwin Connect-WinEC2Instance
-New-Alias nwin New-WinEC2Instance
-New-Alias rwin Remove-WinEC2Instance
-New-Alias icmwin Invoke-WinEC2Command
+Set-Alias cwin Connect-WinEC2Instance
+Set-Alias nwin New-WinEC2Instance
+Set-Alias rwin Remove-WinEC2Instance
+Set-Alias icmwin Invoke-WinEC2Command

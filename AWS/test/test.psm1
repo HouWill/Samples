@@ -1,4 +1,6 @@
-﻿function IgnoreError ($scriptBlock)
+﻿$logStatFile = 'c:\temp\driver.log'
+
+function IgnoreError ($scriptBlock)
 {
     try
     {
@@ -6,27 +8,6 @@
     }
     catch
     {
-    }
-}
-
-function RetryOnError ($scriptBlock, $retryCount = 3)
-{
-    for ($i=1; $i -le $retryCount; $i++)
-    {
-        try
-        {
-            . $scriptBlock
-            break
-        }
-        catch
-        {
-            Write-Host "Error: $($_.Exception.Message), RetryCount=$i, ScriptBlock=$scriptBlock" -ForegroundColor Yellow
-            if ($i -eq $retryCount)
-            {
-                throw $_.Execption
-            }
-            Sleep 10 # wait before retrying
-        }
     }
 }
 
@@ -74,6 +55,76 @@ function RandomPick ([string[]] $list)
     $list[(Get-Random $list.Count)]
 }
 
+function gstat ([string]$logfile = $logStatFile)
+{
+    if (Test-Path $logfile)
+    {
+        [int]$success = (cat $logfile | Select-String 'Success:').Line | wc -l
+        [int]$fail = (cat $logfile | Select-String 'Fail:').Line | wc -l
+        if ($success+$fail -gt 0)
+        {
+            $percent = [decimal]::Round(100*$success/($success+$fail))
+        }
+        else
+        {
+            $percent = 0
+        }
+        "Statistics: Success=$success, Fail=$fail percent success=$percent%"
+    }
+    else
+    {
+        Write-Warning "$logfile not found"
+    }
+}
+
+function gfail ([string]$logfile = $logStatFile, [string]$token)
+{
+   glog $logfile $token 'Fail'
+}
+
+
+function gpass ([string]$logfile = $logStatFile, [string]$token)
+{
+   glog $logfile $token 'Success'
+}
+
+function glog ([string]$logfile = $logStatFile, [string]$token, $result='')
+{
+    if (Test-Path $logfile)
+    {
+        $lines = cat $logfile | where { $_ -like "$result*" }
+
+        if ($token.Length -gt 0)
+        {
+            $lines | % { $_.split("`t")} | where {$_ -like "*$token*" } | % { $_.split('=')[1]}
+        }
+        else
+        {
+            $lines
+        <#
+            foreach ($line in $lines)
+            {
+                $parts = $line.Split("`t")
+                for($i=0; $i -lt $parts.Count; $i++)
+                {
+                    if ($i -eq 0)
+                    {
+                        $parts[$i]
+                    }
+                    else
+                    {
+                        "    $($parts[$i])"
+                    }
+                }
+            }
+            #>
+        }
+    }
+    else
+    {
+        Write-Warning "$logfile not found"
+    }
+}
 
 function RunTest ([string[]] $Tests, [string]$OnError)
 {
