@@ -84,7 +84,8 @@ function New-WinEC2Instance
         [int32]$IOPS = 0,
         [string]$volumetype = 'standard',
         [switch]$DontCleanUp, # Don't cleanup EC2 instance on error
-        [string]$Placement_AvailabilityZone = $null
+        [string]$Placement_AvailabilityZone = $null,
+        [int]$VolumeSize = 0
         )
 
     trap { break } #This stops execution on any exception
@@ -155,7 +156,10 @@ $(if ($Name -eq $null -or (-not $RenameComputer)) { 'Restart-Service winrm' }
 
         $Volume = New-Object Amazon.EC2.Model.EbsBlockDevice
         $Volume.DeleteOnTermination = $True
-        #$Volume.VolumeSize = 30
+        if ($VolumeSize -gt 0)
+        {
+            $Volume.VolumeSize = $VolumeSize
+        }
         
         if ($IOPS -eq 0)
         {
