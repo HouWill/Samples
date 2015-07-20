@@ -32,20 +32,19 @@ function Explode ([Hashtable[]]$parameterSets,
 }
 
 
-Update-WinEC2FireWallSource
-Remove-WinEC2Instance *
-
+$parameterSets = Explode $parameterSets 'InstanceType' @('t2.micro')
+<#
 $parameterSets = Explode $parameterSets 'InstanceType' @('t2.micro', 't2.small', 't2.medium', 
                 'm3.medium', 'm3.large', 'm3.xlarge', 'm3.2xlarge',
                 'c3.large', 'c3.xlarge', 'c3.2xlarge', 'c3.4xlarge', 'c3.8xlarge', 
                 'r3.large', 'r3.xlarge', 'r3.2xlarge', 'r3.4xlarge', 'r3.8xlarge', 
                 'i2.xlarge', 'i2.2xlarge', 'i2.4xlarge', 'i2.8xlarge', 
                 'hs1.8xlarge', 'g2.2xlarge')
+#>
 $parameterSets = Explode $parameterSets 'ImagePrefix' @('Windows_Server-2012-R2_RTM-English-64Bit-Base')
-#$parameterSets = Explode $parameterSets 'ImagePrefix' @('Siva2012R2')
-$parameterSets = Explode $parameterSets 'Region' @($DefaultRegion)
+$parameterSets = Explode $parameterSets 'Region' @('us-east-1')
 $parameterSets = Explode $parameterSets 'IOPS' @(0)
-$parameterSets = Explode $parameterSets 'gp2' @($true, $false)
+$parameterSets = Explode $parameterSets 'gp2' @($true)
 
 $i = 0
 $ps1files = New-Object System.Collections.ArrayList
