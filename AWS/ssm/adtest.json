@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "1.0",
+  "description": "Domain join example json document",
+  "runtimeConfig": {
+      "aws:domainJoin": {
+          "directoryId": "d-8888888888", 
+          "directoryName": "example.domain.com", 
+          "dnsIpAddresses": ["172.16.2.156", "172.16.1.18"], 
+    }
+}

@@ -1,0 +1,29 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Stmt1415763493000",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:CreateAssociation",
+        "ssm:CreateDocument",
+        "ssm:DeleteAssociation",
+        "ssm:DeleteDocument",
+        "ssm:DescribeAssociation",
+        "ssm:DescribeDocument",
+        "ssm:GetDocument",
+        "ssm:ListAssociations",
+        "ssm:ListDocuments",
+        "ssm:RegisterDomainComputerAccount",
+        "ssm:UpdateAssociationStatus ",
+        "ds:CreateComputer",
+        "ds:ListAuthorizedApplications",
+        "ds:AuthorizeApplication",
+        "ec2:DescribeStatus"
+      ],
+      "Resource": [
+        "*"
+      ]
+    }
+  ]
+}
