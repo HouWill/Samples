@@ -71,4 +71,10 @@ end
     C:\opscode\chef\bin\chef-apply.bat C:\temp\7zip.rb | Out-File 'c:\temp\chef-apply.log'
 }
 
+function Test1 ()
+{
+    "#PSTEST# Memory=$($(Get-WmiObject Win32_PhysicalMemoryArray).MaxCapacity/1KB)MB"
+    ipconfig
+}
+
 #ChefInstall -MSIPath 'https://opscode-omnibus-packages.s3.amazonaws.com/windows/2008r2/x86_64/chef-client-12.3.0-1.msi'
