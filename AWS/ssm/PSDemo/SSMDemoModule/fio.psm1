@@ -149,7 +149,7 @@ function FIOTest (
         $IODepths = @(32),
         $RepeatCount = 3,
         $Ramptime = 5,
-        $Runtime = 30
+        $Runtime = 15
     )
 {
     try
@@ -174,6 +174,6 @@ function FIOTest (
     }
     catch 
     {
-        Write-Error $_.message
+        Write-Error "Error: $($_.Exception.Message)"
     }
 }

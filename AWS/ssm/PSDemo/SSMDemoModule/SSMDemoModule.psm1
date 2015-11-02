@@ -73,8 +73,23 @@ end
 
 function Test1 ()
 {
+    'Hello this is test1'
     "#PSTEST# Memory=$($(Get-WmiObject Win32_PhysicalMemoryArray).MaxCapacity/1KB)MB"
-    ipconfig
+    dir c:\
+}
+
+
+function Test2 ()
+{
+    'Hello this is test2'
+    if (! (Test-Path c:\test)) {
+        'returning 3010, should continue after reboot'
+        $null = md c:\test
+        exit 3010 # Reboot requested
+    } else {
+        del c:\test -force
+        'Test2 completed!!!'
+    }
 }
 
 #ChefInstall -MSIPath 'https://opscode-omnibus-packages.s3.amazonaws.com/windows/2008r2/x86_64/chef-client-12.3.0-1.msi'
