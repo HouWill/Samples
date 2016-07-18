@@ -1,5 +1,5 @@
 ﻿Set-DefaultAWSRegion 'us-east-1'
-$VerbosePreference='Continue'
+#$VerbosePreference='Continue'
 trap { break } #This stops execution on any exception
 $ErrorActionPreference = 'Stop'
 

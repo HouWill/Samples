@@ -1,8 +1,8 @@
-﻿$VerbosePreference='Continue'
+﻿#$VerbosePreference='Continue'
 
 function SSMCreateKeypair (
-        [string]$KeyName = 'ssm-demo-key',
-        [string]$KeyFile = "c:\keys\$keyName.$((Get-DefaultAWSRegion).Region).pem"
+        [string]$KeyName = 'winec2keypair',
+        [string]$KeyFile = "c:\keys\$((Get-DefaultAWSRegion).Region).$keyName.pem"
     )
 {
     if (Get-EC2KeyPair  | ? { $_.KeyName -eq $keyName }) { 
@@ -15,8 +15,8 @@ function SSMCreateKeypair (
 }
 
 function SSMRemoveKeypair (
-        [string]$KeyName = 'ssm-demo-key',
-        [string]$KeyFile = "c:\keys\$keyName.$((Get-DefaultAWSRegion).Region).pem"
+        [string]$KeyName = 'winec2keypair',
+        [string]$KeyFile = "c:\keys\$((Get-DefaultAWSRegion).Region).$keyName.pem"
     )
 {
     #delete keypair
@@ -25,21 +25,22 @@ function SSMRemoveKeypair (
     Write-Verbose "Removed keypair=$keypair, keyfile=$keyfile"
 }
 
-function SSMCreateInstance (
+function SSMCreateWindowsInstance (
         [string]$ImageName = 'WINDOWS_2012R2_BASE',
-        [string]$SecurityGroupName = 'ssm-demo-sg',
+        [string]$SecurityGroupName = 'winec2securitygroup',
         [string]$InstanceType = 'm4.large',
         [string]$Tag = 'ssm-demo',
-        [string]$KeyName = 'ssm-demo-key',
-        [string]$KeyFile = "c:\keys\$keyName.$((Get-DefaultAWSRegion).Region).pem",
-        [string]$RoleName = 'ssm-demo-role'
+        [string]$KeyName = 'winec2keypair',
+        [string]$KeyFile = "c:\keys\$((Get-DefaultAWSRegion).Region).$keyName.pem",
+        [string]$RoleName = 'winec2role',
+        [int]$InstanceCount=1
     )
 {
     $filter1 = @{Name='tag:Name';Value=$Tag}
     $filter2 = @{Name='instance-state-name';Values=@('running','pending','stopped')}
     $instance = Get-EC2Instance -Filter @($filter1, $filter2)
     if ($instance) {
-        $instanceId = $instance.Instances[0].InstanceId
+        $instanceId = $instance.Instances.InstanceId
         Write-Verbose "Skipping instance $instanceId creation, already present"
         $instanceId
         return
@@ -52,6 +53,7 @@ function SSMCreateInstance (
 
     #Get the latest R2 base image
     $image = Get-EC2ImageByName $ImageName
+    Write-Verbose "Image=$($image.Name), SecurityGroupName=$SecurityGroupName, InstanceType=$InstanceType, KeyName=$KeyName, RoleName=$RoleName, InstanceCount=$InstanceCount"
 
     #User Data to enable PowerShell remoting on port 80
     #User data must be passed in as 64bit encoding.
@@ -68,44 +70,136 @@ function SSMCreateInstance (
 
     #Launch EC2 Instance with the role, firewall group created
     # and on the right subnet
-    $instance = (New-EC2Instance -ImageId $image.ImageId `
+    $instances = (New-EC2Instance -ImageId $image.ImageId `
                     -InstanceProfile_Id $RoleName `
                     -AssociatePublicIp $true `
                     -SecurityGroupId $securityGroupId `
                     -KeyName $keyName `
                     -UserData $userdataBase64Encoded `
-                    -InstanceType $InstanceType).Instances[0]
+                    -InstanceType $InstanceType `
+                    -MinCount $InstanceCount -MaxCount $InstanceCount).Instances
 
-    #Wait to retrieve password
-    $cmd = { 
-            $password = Get-EC2PasswordData -InstanceId $instance.InstanceId `
-                -PemFile $keyfile -Decrypt 
-            $password -ne $null
-            }
-    SSMWait $cmd 'Password Generation' 600
-
-    $password = Get-EC2PasswordData -InstanceId $instance.InstanceId `
+    foreach ($instance in $instances) {
+        Write-Verbose "InstanceId=$($instance.InstanceId)"
+        New-EC2Tag -ResourceId $instance.InstanceId -Tag @{Key='Name'; Value=$Tag}
+        #Wait to retrieve password
+        $cmd = { 
+                $password = Get-EC2PasswordData -InstanceId $instance.InstanceId `
                     -PemFile $keyfile -Decrypt 
-    $securepassword = ConvertTo-SecureString $Password -AsPlainText -Force
-    $creds = New-Object System.Management.Automation.PSCredential ("Administrator", $securepassword)
+                $password -ne $null
+                }
+        SSMWait $cmd 'Password Generation' 600
 
-    #update the instance to get the public IP Address
-    $instance = (Get-EC2Instance $instance.InstanceId).Instances[0]
+        $password = Get-EC2PasswordData -InstanceId $instance.InstanceId `
+                        -PemFile $keyfile -Decrypt 
+        $securepassword = ConvertTo-SecureString $Password -AsPlainText -Force
+        $creds = New-Object System.Management.Automation.PSCredential ("Administrator", $securepassword)
 
-    #Wait for remote PS connection
-    $cmd = {
-        icm $instance.PublicIpAddress {dir c:\} -Credential $creds -Port 80 
+        #update the instance to get the public IP Address
+        $instance = (Get-EC2Instance $instance.InstanceId).Instances
+
+        #Wait for remote PS connection
+        $cmd = {
+            icm $instance.PublicIpAddress {dir c:\} -Credential $creds -Port 80 
+        }
+        SSMWait $cmd 'Remote Connection' 450
     }
-    SSMWait $cmd 'Remote Connection' 450
-
-    New-EC2Tag -ResourceId $instance.InstanceId -Tag @{Key='Name'; Value=$Tag}
-    $instance.InstanceId
+    $cmd = { 
+        $count = (Get-SSMInstanceInformation -InstanceInformationFilterList @{ Key='InstanceIds'; ValueSet=$instances.InstanceId}).Count
+        $count -eq $InstanceCount
+    }
+    SSMWait $cmd 'Instance Registration' 300
+    $instances.InstanceId
 }
+
+function SSMCreateLinuxInstance (
+        [string]$ImageName = `
+                #'amzn-ami-hvm-*gp2',
+                'ubuntu/images/hvm-ssd/ubuntu-*-14.*',
+        [string]$SecurityGroupName = 'winec2securitygroup',
+        [string]$InstanceType = 'm4.large',
+        [string]$Tag = 'ssm-demo',
+        [string]$KeyName = 'winec2keypair',
+        [string]$KeyFile = "c:\keys\$((Get-DefaultAWSRegion).Region).$keyName.pem",
+        [string]$RoleName = 'winec2role',
+        [int]$InstanceCount=1
+    )
+{
+    $filter1 = @{Name='tag:Name';Value=$Tag}
+    $filter2 = @{Name='instance-state-name';Values=@('running','pending','stopped')}
+    $instance = Get-EC2Instance -Filter @($filter1, $filter2)
+    if ($instance) {
+        $instanceId = $instance.Instances.InstanceId
+        Write-Verbose "Skipping instance $instanceId creation, already present"
+        $instanceId
+        return
+    }
+    $securityGroupId = (Get-EC2SecurityGroup | `
+        ? { $_.GroupName -eq $SecurityGroupName }).GroupId
+    if (! $securityGroupId) {
+        throw "Security Group $SecurityGroupName not found"
+    }
+
+    #Get the latest R2 base image
+    $image = Get-EC2Image -Filters @{Name = "name"; Values = "$ImageName*"} | sort -Property CreationDate -Descending | select -First 1
+    Write-Verbose "Image=$($image.Name), SecurityGroupName=$SecurityGroupName, InstanceType=$InstanceType, KeyName=$KeyName, RoleName=$RoleName, InstanceCount=$InstanceCount"
+
+    $userdata = @'
+#!/bin/bash
+exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+
+if [ -f /etc/debian_version ]; then
+    echo "Debian"
+    curl https://amazon-ssm-us-east-1.s3.amazonaws.com/latest/debian_amd64/amazon-ssm-agent.deb -o amazon-ssm-agent.deb
+    dpkg -i amazon-ssm-agent.deb
+else
+    echo "Amazon Linux or Redhat"
+    curl https://amazon-ssm-us-east-1.s3.amazonaws.com/latest/linux_amd64/amazon-ssm-agent.rpm -o amazon-ssm-agent.rpm
+    yum install -y amazon-ssm-agent.rpm
+fi
+
+'@.Replace("`r",'')
+
+    #User data must be passed in as 64bit encoding.
+    $utf8 = [System.Text.Encoding]::UTF8.GetBytes($userdata)
+    $userdataBase64Encoded = [System.Convert]::ToBase64String($utf8)
+
+    #Launch EC2 Instance with the role, firewall group created
+    # and on the right subnet
+    $instances = (New-EC2Instance -ImageId $image.ImageId `
+                    -InstanceProfile_Id $RoleName `
+                    -AssociatePublicIp $true `
+                    -SecurityGroupId $securityGroupId `
+                    -KeyName $keyName `
+                    -UserData $userdataBase64Encoded `
+                    -InstanceType $InstanceType `
+                    -MinCount $InstanceCount -MaxCount $InstanceCount).Instances
+    New-EC2Tag -ResourceId $instances.InstanceId -Tag @{Key='Name'; Value=$Tag}
+
+    foreach ($instance in $instances) {
+        Write-Verbose "InstanceId=$($instance.InstanceId)"
+
+        $cmd = { 
+            $a = $(Get-EC2Instance -Filter @{Name = "instance-id"; Values = $instance.InstanceId}).Instances
+            ping $a.PublicIpAddress > $null
+            $LASTEXITCODE -eq 0
+        }
+        SSMWait $cmd 'ping' 300
+    
+    }
+    $cmd = { 
+        $count = (Get-SSMInstanceInformation -InstanceInformationFilterList @{ Key='InstanceIds'; ValueSet=$instances.InstanceId}).Count
+        $count -eq $InstanceCount
+    }
+    SSMWait $cmd 'Instance Registration' 300
+    $instances.InstanceId
+}
+
 
 function SSMEnter-PSSession (
         [string]$Tag = $instanceName,
-        [string]$KeyName = 'ssm-demo-key',
-        [string]$KeyFile = "c:\keys\$keyName.$((Get-DefaultAWSRegion).Region).pem"
+        [string]$KeyName = 'winec2keypair',
+        [string]$KeyFile = "c:\keys\$((Get-DefaultAWSRegion).Region).$keyName.pem"
     )
 {
     $instance = (Get-EC2Instance -Filter @{Name='tag:Name';Value=$Tag}).Instances[0]
@@ -119,52 +213,100 @@ function SSMEnter-PSSession (
 
 function SSMRemoveInstance (
         [string]$Tag = 'ssm-demo',
-        [string]$KeyName = 'ssm-demo-key',
-        [string]$KeyFile = "c:\keys\$keyName.$((Get-DefaultAWSRegion).Region).pem"
+        [string]$KeyName = 'winec2keypair',
+        [string]$KeyFile = "c:\keys\$((Get-DefaultAWSRegion).Region).$keyName.pem"
     )
 {
     $filter1 = @{Name='tag:Name';Value=$Tag}
     $filter2 = @{Name='instance-state-name';Values=@('running','pending','stopped')}
-    $instance = Get-EC2Instance -Filter @($filter1, $filter2)
+    $instances = (Get-EC2Instance -Filter @($filter1, $filter2)).Instances
     
-    if ($instance) {
-        $instanceId = $instance.Instances[0].InstanceId
-
-        $null = Stop-EC2Instance -Instance $instanceId -Force -Terminate
-
-        Write-Verbose "Terminated instance $instanceId"
+    if ($instances) {
+        foreach ($instance in $instances) {
+            $instanceId = $instance.InstanceId
+            $null = Stop-EC2Instance -Instance $instanceId -Force -Terminate
+            Write-Verbose "Terminated instance $instanceId"
+        }
     } else {
         Write-Verbose "Skipping as instance with name=$Tag not found"
     }
 }
 
-function SSMCreateSecurityGroup ([string]$SecurityGroupName = 'ssm-demo-sg')
+function SSMCreateSecurityGroup ([string]$SecurityGroupName = 'winec2securitygroup')
 {
-    if (Get-EC2SecurityGroup | ? { $_.GroupName -eq $securityGroupName }) {
-        Write-Verbose "Skipping as SecurityGroup $securityGroupName already present."
-        return;
+    if ($securityGroup = (Get-EC2SecurityGroup | ? { $_.GroupName -eq $securityGroupName })) {
+        Write-Verbose "Skipping as SecurityGroup ($securityGroupName) already present."
+        $securityGroupId = $securityGroup.GroupId
+    } else {
+        #Security group and the instance should be in the same network (VPC)
+        $vpc = Get-EC2Vpc | ? { $_.IsDefault } | select -First 1
+        $securityGroupId = New-EC2SecurityGroup $securityGroupName  -Description "winec2 Securitygroup" -VpcId $vpc.VpcId
+        $securityGroup = Get-EC2SecurityGroup -GroupName $securityGroupName 
+        Write-Verbose "Security Group $securityGroupName created"
     }
-    #Security group and the instance should be in the same network (VPC)
-    $securityGroupId = New-EC2SecurityGroup $securityGroupName  -Description "SSM Demo" -VpcId $subnet.VpcId
-    Write-Verbose "Security Group $securityGroupName created"
 
+#Revoke-EC2SecurityGroupIngress -GroupId $securityGroupId -IpPermission $securityGroup.IpPermissions
+    #Compute new ip ranges
     $bytes = (Invoke-WebRequest 'http://checkip.amazonaws.com/').Content
-    $SourceIPRange = @(([System.Text.Encoding]::Ascii.GetString($bytes).Trim() + "/32"))
-    Write-Verbose "$sourceIPRange retreived from checkip.amazonaws.com"
+    $myIP = @(([System.Text.Encoding]::Ascii.GetString($bytes).Trim() + "/32"))
+    Write-Verbose "$myIP retreived from checkip.amazonaws.com"
+    $ips = @($myIP)
+    $ips += (Get-EC2Vpc).CidrBlock
 
-    $fireWallPermissions = @(
-        @{IpProtocol = 'tcp'; FromPort = 3389; ToPort = 3389; IpRanges = $SourceIPRange},
-        @{IpProtocol = 'tcp'; FromPort = 5985; ToPort = 5986; IpRanges = $SourceIPRange},
-        @{IpProtocol = 'tcp'; FromPort = 80; ToPort = 80; IpRanges = $SourceIPRange},
-        @{IpProtocol = 'icmp'; FromPort = -1; ToPort = -1; IpRanges = $SourceIPRange}
-    )
+    $SourceIPRanges = @()
+    foreach ($ip in $ips) {
+        $SourceIPRanges += @{ IpProtocol="tcp"; FromPort="80"; ToPort="5986"; IpRanges=$ip}
+        $SourceIPRanges += @{ IpProtocol='icmp'; FromPort = -1; ToPort = -1; IpRanges = $ip}
+    }
 
-    Grant-EC2SecurityGroupIngress -GroupId $securityGroupId `
-        -IpPermissions $fireWallPermissions
-    Write-Verbose 'Granted permissions for ports 3389, 80, 5985'
+    #Current expanded list
+    $currentIPRanges = @()
+    foreach ($ipPermission in $securityGroup.IpPermission) {
+        foreach ($iprange in $ipPermission.IpRange) {
+            $currentIPRanges += @{ IpProtocol=$ipPermission.IpProtocol; FromPort =$ipPermission.FromPort; ToPort = $ipPermission.ToPort; IpRanges = $iprange}
+        }
+    }
+
+    # Remove IPRange from current, if it should not be
+    foreach ($currentIPRange in $currentIPRanges) {
+        $found = $false
+        foreach ($SourceIPRange in $SourceIPRanges) {
+            if ($SourceIPRange.IpProtocol -eq $currentIPRange.IpProtocol -and
+                $SourceIPRange.FromPort -eq $currentIPRange.FromPort -and
+                $SourceIPRange.ToPort -eq $currentIPRange.ToPort -and
+                $SourceIPRange.IpRanges -eq $currentIPRange.IpRanges) {
+                    $found = $true
+                    break
+            }
+        }
+        if ($found) {
+            Write-Verbose "Skipping protocol=$($currentIPRange.IpProtocol) IPRange=$($currentIPRange.IpRanges)"
+        } else {
+            Revoke-EC2SecurityGroupIngress -GroupId $securityGroupId -IpPermission $currentIPRange
+            Write-Verbose "Revoked permissions protocol=$($currentIPRange.IpProtocol) IPRange=$($currentIPRange.IpRanges)"
+        }
+    }
+
+    # Add IPRange to current, if it is not present
+    foreach ($SourceIPRange in $SourceIPRanges) {
+        $found = $false
+        foreach ($currentIPRange in $currentIPRanges) {
+            if ($SourceIPRange.IpProtocol -eq $currentIPRange.IpProtocol -and
+                $SourceIPRange.FromPort -eq $currentIPRange.FromPort -and
+                $SourceIPRange.ToPort -eq $currentIPRange.ToPort -and
+                $SourceIPRange.IpRanges -eq $currentIPRange.IpRanges) {
+                    $found = $true
+                    break
+            }
+        }
+        if (! $found) {
+            Grant-EC2SecurityGroupIngress -GroupId $securityGroupId -IpPermissions $SourceIPRange
+            Write-Verbose "Granted permissions for ports 80 to 5986, for IP=($SourceIPRange.IpRanges)"
+        }
+    }
 }
 
-function SSMRemoveSecurityGroup ([string]$SecurityGroupName = 'ssm-demo-sg')
+function SSMRemoveSecurityGroup ([string]$SecurityGroupName = 'winec2securitygroup')
 {
     $securityGroupId = (Get-EC2SecurityGroup | `
         ? { $_.GroupName -eq $securityGroupName }).GroupId
@@ -186,7 +328,8 @@ function SSMRunCommand (
         [string]$Outputs3BucketName,
         [string]$Outputs3KeyPrefix = 'ssmoutput',
         [int]$Timeout = 300,
-        [int]$SleepTimeInMilliSeconds = 2000
+        [int]$SleepTimeInMilliSeconds = 2000,
+        [Boolean]$DumpAndDeleteS3 = $true
     )
 {
     $parameters = @{
@@ -214,6 +357,7 @@ function SSMRunCommand (
     $null = SSMWait -Cmd $cmd -Message 'Command Execution' -RetrySeconds $Timeout -SleepTimeInMilliSeconds $SleepTimeInMilliSeconds
     
     $command = Get-SSMCommand -CommandId $result.CommandId
+    if ($DumpAndDeleteS3) { SSMDumpOutput $command}
     if ($command.Status -ne 'Success') {
         throw "Command $($command.CommandId) did not succeed, Status=$($command.Status)"
     }
@@ -258,9 +402,9 @@ function SSMDumpOutput (
                     Write-Verbose "$($s3object.key.Substring($offset)):"
                     $null = Read-S3Object -BucketName $bucket `
                              -Key $s3object.Key -File $tempFile
-                    if ($s3object.key.EndsWith('stdout.txt')) {
-                        cat $tempFile -Raw
-                    } elseif ($s3object.key.EndsWith('stderr.txt')) {
+                    if ($s3object.key.EndsWith('stdout.txt') -or $s3object.key.EndsWith('stdout')) {
+                        cat $tempFile -Raw | Write-Host
+                    } elseif ($s3object.key.EndsWith('stderr.txt') -or $s3object.key.EndsWith('stderr')) {
                         cat $tempFile -Raw | Write-Error
                     } else {
                         cat $tempFile -Raw | Write-Verbose
@@ -278,7 +422,7 @@ function SSMDumpOutput (
     }
 }
 
-function SSMCreateRole ([string]$RoleName = 'ssm-demo-role')
+function SSMCreateRole ([string]$RoleName = 'winec2role')
 {
     if (Get-IAMRoles | ? {$_.RoleName -eq $RoleName}) {
         Write-Verbose "Skipping as role ($RoleName) is already present."
@@ -327,6 +471,8 @@ function SSMCreateRole ([string]$RoleName = 'ssm-demo-role')
         "ssm:UpdateAssociationStatus",
         "ssm:UpdateInstanceInformation",
         "ec2:DescribeInstanceStatus"
+        #,"ec2:*",
+        #"s3:*"
       ],
       "Resource": "*"
     }
@@ -334,19 +480,24 @@ function SSMCreateRole ([string]$RoleName = 'ssm-demo-role')
 }
 "@
 
+    #step a - Create the role and specify who can assume
     $null = New-IAMRole -RoleName $RoleName `
                 -AssumeRolePolicyDocument $assumePolicy
+    
+    #step b - write the role policy
     Write-IAMRolePolicy -RoleName $RoleName `
                 -PolicyDocument $policy -PolicyName 'ssm'
 
-    #Create instance profile and add the above created role
+    #step c - Create instance profile
     $null = New-IAMInstanceProfile -InstanceProfileName $RoleName
+
+    #step d - Add the role to the profile
     Add-IAMRoleToInstanceProfile -InstanceProfileName $RoleName `
             -RoleName $RoleName
     Write-Verbose "Role $RoleName created" 
 }
 
-function SSMRemoveRole ([string]$RoleName = 'ssm-demo-role')
+function SSMRemoveRole ([string]$RoleName = 'winec2role')
 {
     if (!(Get-IAMRoles | ? {$_.RoleName -eq $RoleName})) {
         Write-Verbose "Skipping as role ($RoleName) not found"
@@ -369,17 +520,18 @@ function SSMWait (
 {
     $_msg = "Waiting for $Message to succeed"
     $_t1 = Get-Date
-    Write-Verbose "$_msg in $RetrySeconds seconds"
     while ($true)
     {
         $_t2 = Get-Date
+        $_t = [int]($_t2 - $_t1).TotalSeconds
+        Write-Verbose "$_msg ($_t/$RetrySeconds) Seconds."
         try
         {
             $_result = & $Cmd 2>$_null | select -Last 1 
             if ($? -and $_result)
             {
                 Write-Verbose("Succeeded $Message in " + `
-                    "$_([int]($_t2-$_t1).TotalSeconds) Seconds, Result=$_result")
+                    "$([int]($_t2-$_t1).TotalSeconds) Seconds, Result=$_result")
                 break;
             }
         }
@@ -393,7 +545,6 @@ function SSMWait (
                 "Current result=$_result"
             break
         }
-        Write-Verbose "$_msg ($_t/$RetrySeconds) Seconds."
         Sleep -Milliseconds $SleepTimeInMilliSeconds
     }
 }
