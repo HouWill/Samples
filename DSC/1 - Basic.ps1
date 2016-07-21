@@ -21,7 +21,6 @@ configuration main
     }
 }
 
-
 #1 compile - call main to genrate MOF
 Write-Host "`n1. Generating MOF localhost.mof" -ForegroundColor Yellow
 main -OutputPath C:\temp\config 

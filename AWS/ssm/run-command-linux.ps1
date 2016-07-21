@@ -1,18 +1,14 @@
-﻿param($ImageName = 'amzn-ami-hvm-*gp2')
+﻿param($ImageName = 'amzn-ami-hvm-*gp2', $Region = 'us-east-1', $S3Bucket='sivaiadbucket')
 
 Write-Host "***********************************" -ForegroundColor Yellow
 Write-Host "ImangeName=$ImageName" -ForegroundColor Yellow
 Write-Host "***********************************" -ForegroundColor Yellow
-
-Set-DefaultAWSRegion 'us-east-1'
-#Set-DefaultAWSRegion 'us-west-2'
+Set-DefaultAWSRegion $Region
 $VerbosePreference='Continue'
 trap { break } #This stops execution on any exception
 $ErrorActionPreference = 'Stop'
-
 cd $PSScriptRoot
 . .\ssmcommon.ps1
-
 $index = '1'
 if ($psISE -ne $null)
 {
@@ -22,21 +18,45 @@ if ($psISE -ne $null)
 }
 $instanceName = "ssm-demo-$index"
 
-Write-Host "`nCreate Role winec2role if not present" -ForegroundColor Yellow
-SSMCreateRole
+
+
+
+
 
 Write-Host "`nCreate Keypair winec2keypair if not present and save the in c:\keys" -ForegroundColor Yellow
 SSMCreateKeypair
 
+
+
+
+
+
+Write-Host "`nCreate Role winec2role if not present" -ForegroundColor Yellow
+SSMCreateRole
+
+
+
+
+
 Write-Host "`nCreate SecurityGroup winec2securitygroup if not present" -ForegroundColor Yellow
 SSMCreateSecurityGroup 
 
-Write-Host "`nCreate a new instance and name it as $instanceName" -ForegroundColor Yellow
+
+
+
+
+
+Write-Host "`nCreate instance(s) and name it as $instanceName" -ForegroundColor Yellow
 $instanceId = SSMCreateLinuxInstance -Tag $instanceName -ImageName $ImageName -InstanceCount 3
-#$instanceId = SSMCreateLinuxInstance -Tag $instanceName -ImageName 'ubuntu/images/hvm-ssd/ubuntu-*-14.*' -InstanceCount 3
+
+
+
+
 
 $script = @'
-ifconfig
+    ifconfig
+    #cd /tmp
+    echo working dir=`pwd`
 '@.Replace("`r",'')
 
 Write-Host "`nAWS-RunShellScript: Excute shell script" -ForegroundColor Yellow
@@ -46,16 +66,32 @@ $command = SSMRunCommand `
     -Parameters @{
         commands=$script
      } `
-    -Outputs3BucketName 'sivaiadbucket'
+    -Outputs3BucketName $S3Bucket
 
-#Read-Host 'AWS-RunShellScript: completed'
+
+
+
+
+
+
+
+
+
+
 
 #Cleanup
 Write-Host "`nTerminating instance" -ForegroundColor Yellow
-SSMRemoveInstance $instanceName
+#SSMRemoveInstance $instanceName
+
+
 
 #SSMRemoveRole
 
+
+
 #SSMRemoveKeypair
+
+
+
 
 #SSMRemoveSecurityGroup 
