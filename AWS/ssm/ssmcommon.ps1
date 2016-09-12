@@ -22,9 +22,6 @@ function SSMRemoveKeypair (
     Write-Verbose "Removed keypair=$keypair, keyfile=$keyfile"
 }
 
-
-
-
 function SSMCreateRole ([string]$RoleName = 'winec2role')
 {
     if (Get-IAMRoles | ? {$_.RoleName -eq $RoleName}) {
