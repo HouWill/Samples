@@ -184,6 +184,7 @@ function SSMCreateSecurityGroup ([string]$SecurityGroupName = 'winec2securitygro
         }
     }
 }
+
 function SSMRemoveSecurityGroup ([string]$SecurityGroupName = 'winec2securitygroup')
 {
     $securityGroupId = (Get-EC2SecurityGroup | `
