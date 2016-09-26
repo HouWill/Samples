@@ -37,3 +37,9 @@ $global:instance = New-WinEC2Instance -Name $Name -InstanceType $InstanceType `
 
 $Obj.'InstanceId' = $instance.InstanceId
 $Obj.'KeyPairName' = $KeyPairName
+$obj.RunningTime = $instance.Time.Running
+$obj.PingTime = $instance.Time.Ping
+$obj.PasswordTime = $instance.Time.Password
+$obj.RemoteTime = $instance.Time.Remote
+$obj.AZ = $instance.Instance.Placement.AvailabilityZone
+$obj.EbsOptimized = $instance.Instance.EbsOptimized

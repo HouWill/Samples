@@ -36,7 +36,7 @@
 param ($instanceType = 'Small')
 
 $image = Get-AzureVMImage | 
-            ? label -Like "Windows Server 2012 datacenter*"  | 
+            ? label -Like "Windows Server 2012 R2*"  | 
             select -Last 1
 $image.Label
 
@@ -49,7 +49,7 @@ $password = "pass-$(Get-Random)"
 "Password=$password"
 
 $startTime = Get-Date
-Write-Host "$($startTime) - Starting" -ForegroundColor Green
+Write-Host "$($startTime) - Creating VM, will take 5+ minutes" -ForegroundColor Green
 
 
 New-AzureQuickVM -Name $name `

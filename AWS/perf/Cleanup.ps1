@@ -3,7 +3,7 @@ param ($DefaultRegion = 'us-east-1')
 
 Set-DefaultAWSRegion $DefaultRegion
 
-. "$PSScriptRoot\Common Setup.ps1"
+. "$PSScriptRoot\Common Setup.ps1" -SkipDeletingOutput
 
 Remove-WinEC2Instance 'perf*' -NoWait
 

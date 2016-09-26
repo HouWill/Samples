@@ -16,7 +16,5 @@ if (Test-PSTestExecuting) {
         $null = md $PSScriptRoot\output -ea 0
     }
     cd $PSScriptRoot\output
-    
-    . ..\..\ssm\ssmcommon.ps1
 }
 
