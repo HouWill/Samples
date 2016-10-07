@@ -10,9 +10,13 @@ Write-Verbose 'Executing Run Command'
 . "$PSScriptRoot\Common Setup.ps1"
 
 
+$filter = @{Key='ActivationIds'; ValueSet=$Obj.'ActivationId'}
+$mi = (Get-SSMInstanceInformation -InstanceInformationFilterList $filter).InstanceId
+
+
 $startTime = Get-Date
 $command = SSMRunCommand `
-    -InstanceIds $obj.InstanceId `
+    -InstanceIds $mi `
     -SleepTimeInMilliSeconds 1000 `
     -Parameters @{
         commands=@(
@@ -20,6 +24,6 @@ $command = SSMRunCommand `
         )
      }
 
-$obj.'CommandId' = $command
-$obj.RunCommandTime = (Get-Date) - $startTime
+$obj.'mi-CommandId' = $command
+$obj.'Mi-RunCommandTime' = (Get-Date) - $startTime
 SSMDumpOutput $command

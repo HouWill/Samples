@@ -23,3 +23,23 @@ $command = SSMRunCommand `
 $obj.'CommandId' = $command
 $obj.RunCommandTime = (Get-Date) - $startTime
 SSMDumpOutput $command
+
+$filter = @{Key='ActivationIds'; ValueSet=$Obj.'ActivationId'}
+$mi = (Get-SSMInstanceInformation -InstanceInformationFilterList $filter).InstanceId
+
+
+$startTime = Get-Date
+$command = SSMRunCommand `
+    -InstanceIds $mi `
+    -SleepTimeInMilliSeconds 1000 `
+    -Parameters @{
+        commands=@(
+            'ipconfig'
+        )
+     }
+
+
+
+$obj.'mi-CommandId' = $command
+$obj.'Mi-RunCommandTime' = (Get-Date) - $startTime
+SSMDumpOutput $command

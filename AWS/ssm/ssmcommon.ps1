@@ -36,13 +36,13 @@ function SSMCreateRole ([string]$RoleName = 'winec2role')
       {
         "Sid":"",
         "Effect":"Allow",
-        "Principal":{"Service":"ec2.amazonaws.com"},
+        "Principal":{"Service":["ec2.amazonaws.com", "ssm.amazonaws.com"]},
         "Action":"sts:AssumeRole"
       }
     ]
 }
 "@
-
+<#
     # Define which API actions and resources the application can use 
     # after assuming the role
     $policy = @"
@@ -77,14 +77,16 @@ function SSMCreateRole ([string]$RoleName = 'winec2role')
   ]
 }
 "@
-
+#>
     #step a - Create the role and specify who can assume
     $null = New-IAMRole -RoleName $RoleName `
                 -AssumeRolePolicyDocument $assumePolicy
     
     #step b - write the role policy
-    Write-IAMRolePolicy -RoleName $RoleName `
-                -PolicyDocument $policy -PolicyName 'ssm'
+    #Write-IAMRolePolicy -RoleName $RoleName `
+    #            -PolicyDocument $policy -PolicyName 'ssm'
+
+    Register-IAMRolePolicy -RoleName $RoleName -PolicyArn 'arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM'
 
     #step c - Create instance profile
     $null = New-IAMInstanceProfile -InstanceProfileName $RoleName
@@ -101,10 +103,10 @@ function SSMRemoveRole ([string]$RoleName = 'winec2role')
         return
     }
     #Remove the instance role and IAM Role
-    Remove-IAMRoleFromInstanceProfile -InstanceProfileName $RoleName `
-        -RoleName $RoleName -Force
-    Remove-IAMInstanceProfile $RoleName -Force
-    Remove-IAMRolePolicy $RoleName ssm -Force
+    Invoke-PSUtilIgnoreError {Remove-IAMRoleFromInstanceProfile -InstanceProfileName $RoleName -RoleName $RoleName -Force}
+    Invoke-PSUtilIgnoreError {Remove-IAMInstanceProfile $RoleName -Force}
+    Invoke-PSUtilIgnoreError {Unregister-IAMRolePolicy -RoleName $RoleName -PolicyArn 'arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM'}
+    #Remove-IAMRolePolicy $RoleName ssm -Force
     Remove-IAMRole $RoleName -Force
     Write-Verbose "Role $RoleName removed" 
 }
@@ -126,7 +128,7 @@ function SSMCreateSecurityGroup ([string]$SecurityGroupName = 'winec2securitygro
     }
 
     #Compute new ip ranges
-    $bytes = (Invoke-WebRequest 'http://checkip.amazonaws.com/').Content
+    $bytes = (Invoke-WebRequest 'http://checkip.amazonaws.com/' -UseBasicParsing).Content
     $myIP = @(([System.Text.Encoding]::Ascii.GetString($bytes).Trim() + "/32"))
     Write-Verbose "$myIP retreived from checkip.amazonaws.com"
     $ips = @($myIP)
@@ -134,7 +136,7 @@ function SSMCreateSecurityGroup ([string]$SecurityGroupName = 'winec2securitygro
 
     $SourceIPRanges = @()
     foreach ($ip in $ips) {
-        $SourceIPRanges += @{ IpProtocol="tcp"; FromPort="80"; ToPort="5986"; IpRanges=$ip}
+        $SourceIPRanges += @{ IpProtocol="tcp"; FromPort="22"; ToPort="5986"; IpRanges=$ip}
         $SourceIPRanges += @{ IpProtocol='icmp'; FromPort = -1; ToPort = -1; IpRanges = $ip}
     }
 
@@ -180,7 +182,7 @@ function SSMCreateSecurityGroup ([string]$SecurityGroupName = 'winec2securitygro
         }
         if (! $found) {
             Grant-EC2SecurityGroupIngress -GroupId $securityGroupId -IpPermissions $SourceIPRange
-            Write-Verbose "Granted permissions for ports 80 to 5986, for IP=($SourceIPRange.IpRanges)"
+            Write-Verbose "Granted permissions for ports 22 to 5986, for IP=($SourceIPRange.IpRanges)"
         }
     }
 }
@@ -408,8 +410,7 @@ function SSMRunCommand (
         [string]$Outputs3BucketName,
         [string]$Outputs3KeyPrefix = 'ssmoutput',
         [int]$Timeout = 300,
-        [int]$SleepTimeInMilliSeconds = 2000,
-        [Boolean]$DumpAndDeleteS3 = $true
+        [int]$SleepTimeInMilliSeconds = 2000
     )
 {
     $parameters = @{
@@ -435,12 +436,13 @@ function SSMRunCommand (
     $null = SSMWait -Cmd $cmd -Message 'Command Execution' -RetrySeconds $Timeout -SleepTimeInMilliSeconds $SleepTimeInMilliSeconds
     
     $command = Get-SSMCommand -CommandId $result.CommandId
-    if ($DumpAndDeleteS3) { SSMDumpOutput $command}
     if ($command.Status -ne 'Success') {
         throw "Command $($command.CommandId) did not succeed, Status=$($command.Status)"
     }
-    $command
+    $result.CommandId
 }
+
+
 function SSMDumpOutput (
         $Command,
         [boolean]$DeleteS3Keys = $true
@@ -451,9 +453,8 @@ function SSMDumpOutput (
     $key = $Command.OutputS3KeyPrefix
     foreach ($instanceId in $Command.InstanceIds) {
         Write-Verbose "InstanceId=$instanceId"
-
-        $invocation = Get-SSMCommandInvocation -InstanceId $instanceId `
-                        -CommandId $commandId -Details $true
+        $global:invocation = Get-SSMCommandInvocation -InstanceId $instanceId `
+                        -CommandId $commandId -Details:$true
 
         foreach ($plugin in $invocation.CommandPlugins) {
             Write-Verbose "Plugin Name=$($plugin.Name)"
@@ -644,4 +645,36 @@ function SSMEnter-PSSession (
     $securepassword = ConvertTo-SecureString $Password -AsPlainText -Force
     $creds = New-Object System.Management.Automation.PSCredential ("Administrator", $securepassword)
     Enter-PSSession $instance.PublicIpAddress -Credential $creds -Port 80 
+}
+
+function SSMInstallAgent ([string]$ConnectionUri, [System.Management.Automation.PSCredential]$Credential, [string]$Region, [string]$DefaultInstanceName)
+{
+    $code = New-SSMActivation -DefaultInstanceName $DefaultInstanceName -IamRole 'test' -RegistrationLimit 1 –Region $region
+
+
+    $sb = {
+        param ($Region, $ActivationCode, $ActivationId)
+
+        Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Force
+
+        $source = "https://amazon-ssm-$region.s3.amazonaws.com/latest/windows_amd64/AmazonSSMAgentSetup.exe"
+        $dest = "$($env:TEMP)\AmazonSSMAgentSetup.exe"
+        del $dest -ea 0
+        $log = "$($env:TEMP)\SSMInstall.log"
+        $webclient = New-Object System.Net.WebClient
+        $webclient.DownloadFile($source, $dest)
+
+        $a = @('/q', '/log', $log, "CODE=$ActivationCode", "ID=$ActivationId", "REGION=$region", 'ALLOWEC2INSTALL=YES')
+        Start-Process $dest -ArgumentList $a -Wait
+        #cat $log
+        $st = Get-Content ("$($env:ProgramData)\Amazon\SSM\InstanceData\registration")
+        Write-Verbose "ProgramData\Amazon\SSM\InstanceData\registration=$st"
+        Write-Verbose (Get-Service -Name "AmazonSSMAgent")
+    }
+
+    Invoke-Command -ScriptBlock $sb -ConnectionUri $ConnectionUri -Credential $Credential -ArgumentList @($region, $code.ActivationCode, $code.ActivationId) -SessionOption (New-PSSessionOption -SkipCACheck)
+
+
+    Remove-SSMActivation $code.ActivationId -Force
+    $code.ActivationId
 }

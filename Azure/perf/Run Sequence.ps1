@@ -13,9 +13,11 @@ Write-Verbose 'Executing Run'
 $InputParameters = @{Name=$Name}
 $tests = @(
     "$PSScriptRoot\Create Instance.ps1"
+    "$PSScriptRoot\SSM Install Agent.ps1"
+    "$PSScriptRoot\Run Command.ps1"
     "$PSScriptRoot\Terminate Instance.ps1"
 )
-Invoke-PsTest -Test $tests -InputParameters $InputParameters  -Count 10
+Invoke-PsTest -Test $tests -InputParameters $InputParameters  -Count 1 -StopOnError
 
 gstat
 

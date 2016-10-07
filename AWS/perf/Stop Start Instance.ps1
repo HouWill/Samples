@@ -5,8 +5,6 @@
 #     $obj - This is a dictionary, used to pass output values
 #            (e.g.) report the metrics back, or pass output values that will be input to subsequent functions
 
-param ($Obj=@{})
-
 Write-Verbose 'Executing Stop Start Instance'
 
 . "$PSScriptRoot\Common Setup.ps1"

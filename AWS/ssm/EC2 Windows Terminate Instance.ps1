@@ -2,15 +2,16 @@
 #    $name - Name identifies logfile and test name in results
 #            When running in parallel, name maps to unique ID.
 #            Some thing like '0', '1', etc when running in parallel
-#     $obj - This is a dictionary, used to pass output values
+#     $obj - This is a global dictionary, used to pass output values
 #            (e.g.) report the metrics back, or pass output values that will be input to subsequent functions
 
-param ($Name = '')
+param ($Name = 'ssm-windows')
 
-Write-Verbose 'Executing Terminate Instance'
+$Name = "ssm-windows$Name"
+Set-DefaultAWSRegion $Region
 
 . "$PSScriptRoot\Common Setup.ps1"
 
-$Name = "perf$Name"
-
+#Terminate
+Write-Verbose "Terminating $Name"
 Remove-WinEC2Instance $Name -NoWait

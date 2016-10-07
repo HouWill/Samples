@@ -9,6 +9,7 @@ if (Test-PSTestExecuting) {
     $ErrorActionPreference = 'Stop'
 
     Import-Module -Global PSTest -Force -Verbose:$false
+    . $PSScriptRoot\ssmcommon.ps1
 
     if (!$SkipDeletingOutput) {
         Write-Verbose "$PSScriptRoot\output deleted"
@@ -17,7 +18,6 @@ if (Test-PSTestExecuting) {
     }
     cd $PSScriptRoot\output
     
-    . ..\..\ssm\ssmcommon.ps1
 
     if ($obj -eq $null) {
         $obj = @{}
