@@ -4,14 +4,14 @@
 #            Some thing like '0', '1', etc when running in parallel
 #     $obj - This is a dictionary, used to pass output values
 #            (e.g.) report the metrics back, or pass output values that will be input to subsequent functions
-
+param ($Name = '', $SSMRegion='us-east-1')
 Write-Verbose 'Executing Run Command'
 
 . "$PSScriptRoot\Common Setup.ps1"
 
 
 $filter = @{Key='ActivationIds'; ValueSet=$Obj.'ActivationId'}
-$mi = (Get-SSMInstanceInformation -InstanceInformationFilterList $filter).InstanceId
+$mi = (Get-SSMInstanceInformation -InstanceInformationFilterList $filter -Region $SSMRegion).InstanceId
 
 
 $startTime = Get-Date

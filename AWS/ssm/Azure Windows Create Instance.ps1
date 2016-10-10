@@ -70,12 +70,13 @@ Write-Verbose "$($Obj.'RemoteTime') - Remote"
 #Install Onprem Agent
 Write-Verbose 'Install onprem agent on EC2 Windows Instance'
 
-$obj.'ActivationId' =  SSMInstallAgent -ConnectionUri $uri -Credential $cred -Region $SSMRegion -DefaultInstanceName $Name
-
-$filter = @{Key='ActivationIds'; ValueSet=$Obj.'ActivationId'}
-$obj.'InstanceId' = (Get-SSMInstanceInformation -InstanceInformationFilterList $filter).InstanceId
+$obj.'InstanceId' =  SSMWindowsInstallAgent -ConnectionUri $uri -Credential $cred -Region $SSMRegion -DefaultInstanceName $Name
 
 <#
+
+$filter = @{Key='ActivationIds'; ValueSet=$Obj.'ActivationId'}
+$obj.'InstanceId' = (Get-SSMInstanceInformation -InstanceInformationFilterList $filter -Region $SSMRegion).InstanceId
+
 $startTime = Get-Date
 $command = SSMRunCommand -InstanceIds $mi -SleepTimeInMilliSeconds 1000 `
     -Parameters @{commands='ipconfig'}

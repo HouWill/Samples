@@ -13,11 +13,18 @@ if ($ServiceName.Length -eq 0) {
 }
 
 $startTime = Get-Date
-Remove-AzureService -ServiceName $serviceName -DeleteAll -Force
+Remove-AzureService -ServiceName $serviceName -DeleteAll -Force -ea 0
 $terminateTime = Get-Date
 Write-Verbose "$($terminateTime - $startTime) - Terminate"
 
 $Obj.'TerminateTime' = $terminateTime - $startTime
+
+
+$cmd = {Get-AzureDisk | ? DiskName -like "$serviceName-*" | Remove-AzureDisk ; $true}
+$null = Invoke-PSUtilWait -Cmd $cmd -Message 'remove disk'
+
+Get-AzureStorageContainer | Get-AzureStorageBlob | ? Name -like "$serviceName.*" | Remove-AzureStorageBlob -Force
+
 
 #No easy way to find the boot diagnostics container. This is a workaround
 foreach ($container in (Get-AzureStorageContainer)) {
@@ -34,4 +41,14 @@ foreach ($container in (Get-AzureStorageContainer)) {
             Remove-AzureStorageContainer -Container $container.Name 
         }
     }
+}
+
+
+function AzureCleanup ()
+{
+    Get-AzureService | Remove-AzureService -Force
+    $cmd = {Get-AzureDisk | Remove-AzureDisk ; $true}
+    $null = Invoke-PSUtilWait -Cmd $cmd -Message 'remove disk'
+    Get-AzureVMImage | ? category -eq 'user'  | Remove-AzureVMImage
+    Get-AzureStorageContainer | Get-AzureStorageBlob | Remove-AzureStorageBlob -Force
 }

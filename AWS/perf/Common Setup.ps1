@@ -17,7 +17,7 @@ if (Test-PSTestExecuting) {
     }
     cd $PSScriptRoot\output
     
-    . ..\..\ssm\ssmcommon.ps1
+    . $PSScriptRoot\..\ssm\ssmcommon.ps1
 
     if ($obj -eq $null) {
         $obj = @{}

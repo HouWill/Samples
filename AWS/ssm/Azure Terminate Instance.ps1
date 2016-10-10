@@ -9,26 +9,35 @@ param ( $Name = '')
 
 . "$PSScriptRoot\Common Setup.ps1"
 
-$Name = $obj.'Name'
+$serviceName = $Obj.'Name'
 
-#Terminate
-Write-Verbose "Terminating $Name"
-if ($Name.Length -eq 0) {
+Write-Verbose "Terminating $serviceName"
+if ($ServiceName.Length -eq 0) {
     throw "ServiceName can't be empty"
 }
 
-Remove-AzureService -ServiceName $Name -DeleteAll -Force
+$startTime = Get-Date
+Remove-AzureService -ServiceName $serviceName -DeleteAll -Force -ea 0
 $terminateTime = Get-Date
 Write-Verbose "$($terminateTime - $startTime) - Terminate"
 
+$Obj.'TerminateTime' = $terminateTime - $startTime
+
+
+$cmd = {Get-AzureDisk | ? DiskName -like "$serviceName-*" | Remove-AzureDisk ; $true}
+$null = Invoke-PSUtilWait -Cmd $cmd -Message 'remove disk'
+
+Get-AzureStorageContainer | Get-AzureStorageBlob | ? Name -like "$serviceName.*" | Remove-AzureStorageBlob -Force
+
+
 #No easy way to find the boot diagnostics container. This is a workaround
 foreach ($container in (Get-AzureStorageContainer)) {
-    $count = (Get-AzureStorageBlob -Container $container.Name | ? Name -like "*$Name*" | measure).Count
+    $count = (Get-AzureStorageBlob -Container $container.Name | ? Name -like "*$serviceName*" | measure).Count
 
     if ($count -gt 0) { # This container has some blobs created.
         Write-Verbose "Remove blobs from Container $($container.Name)"
         Get-AzureStorageContainer -Container $container.Name | Get-AzureStorageBlob | 
-            where { $_.Name -like "*$Name*" -and -not ($_.Name -like '*.vhd') } | Remove-AzureStorageBlob -Force
+            where { $_.Name -like "*$serviceName*" -and -not ($_.Name -like '*.vhd') } | Remove-AzureStorageBlob -Force
 
         if ($container.Name -like 'bootdiagnostics*' -and 
                     (Get-AzureStorageBlob -Container $container.Name | measure).Count -eq 0) {
@@ -38,3 +47,11 @@ foreach ($container in (Get-AzureStorageContainer)) {
     }
 }
 
+function AzureCleanup ()
+{
+    Get-AzureService | Remove-AzureService -Force
+    $cmd = {Get-AzureDisk | Remove-AzureDisk ; $true}
+    $null = Invoke-PSUtilWait -Cmd $cmd -Message 'remove disk'
+    Get-AzureVMImage | ? category -eq 'user'  | Remove-AzureVMImage
+    Get-AzureStorageContainer | Get-AzureStorageBlob | Remove-AzureStorageBlob -Force
+}

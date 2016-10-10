@@ -18,11 +18,11 @@ param ( $Name = '',
         $Placement_AvailabilityZone=$null,
         $AdditionalInfo=$null)
 
-Write-Verbose 'Executing Create Instance'
+$Name = "perf$Name"
+Write-Verbose "Executing Create Instance Name=$Name"
 
 . "$PSScriptRoot\Common Setup.ps1"
 
-$Name = "perf$Name"
 
 Remove-WinEC2Instance $Name -NoWait
 
@@ -68,4 +68,4 @@ $obj.'WindowsReady' = $readyTime - $startTime
 
 Write-Verbose ('Windows Ready Time - {0:mm}:{0:ss}' -f ($obj.'WindowsReady'))
 
-Write-Verbose $consoleLog
+Write-Verbose "Console log:`n$consoleLog"

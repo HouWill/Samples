@@ -1,9 +1,14 @@
-﻿param ($Name)
+﻿#Name should be non zero, when run in parallel.
+param ($Name)
+
+Set-DefaultAWSRegion 'us-east-1'
 
 echo $Name
 $host.ui.RawUI.WindowTitle = $Name
 
-if (! (Test-PSTestExecuting)) {
+. $PSScriptRoot\..\ssm\ssmcommon.ps1
+
+if ($Name.Length -eq 0) {
     . "$PSScriptRoot\Setup.ps1"
 }
 
@@ -23,14 +28,10 @@ $tests = @(
 $InputParametersSets = @(
     @{
         Name=$Name
-        ImagePrefix='Windows_Server-2012-R2_RTM-English-64Bit-Base-COLDBOOTTEST-2016.09.14'
-    },
-    @{
-        Name=$Name
-        ImagePrefix='Windows_Server-2016-RTM-English-64Bit-Full-Base-2016.10.05'
+        AmiId='ami-14226b03'
     }
 )
-Invoke-PsTest -Test $tests -InputParameterSets $InputParametersSets  -Count 3 -LogNamePrefix 'Perf'
+Invoke-PsTest -Test $tests -InputParameterSets $InputParametersSets  -Count 1 -LogNamePrefix 'Perf' -StopOnError
 
 
 gstat
@@ -38,6 +39,6 @@ gstat
 Convert-PsTestToTableFormat    
 
 
-if (! (Test-PSTestExecuting)) {
+if ($Name.Length -eq 0) {
     & "$PSScriptRoot\Cleanup.ps1"
 }

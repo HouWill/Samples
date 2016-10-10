@@ -7,8 +7,9 @@
 
 param ( $Name = '',
         $Region = 'West US',
-        $InstanceType = 'Medium', #'Small',
+        $InstanceType = 'Standard_D1_v2', # 'Medium', #'Small',
         $ImagePrefix='Windows Server 2012 R2'
+        #$ImagePrefix='Windows Server 2016 Tech*'
         #$ImagePrefix='Windows Server 2016 Technical Preview 5 - Nano Server'
 )
 

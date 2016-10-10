@@ -1,26 +1,35 @@
 ﻿function SSMCreateKeypair (
-        [string]$KeyName = 'winec2keypair',
-        [string]$KeyFile = "c:\keys\$((Get-DefaultAWSRegion).Region).$keyName.pem"
+        [string]$KeyFile = 'c:\keys\test'
     )
 {
+    $keyName = $KeyFile.split('/\')[-1]
+
     if (Get-EC2KeyPair  | ? { $_.KeyName -eq $keyName }) { 
         Write-Verbose "Skipping as keypair ($keyName) already present." 
         return
     }
-    Write-Verbose "Create keypair=$keypair, keyfile=$keyfile"
-    $keypair = New-EC2KeyPair -KeyName $keyName
-    "$($keypair.KeyMaterial)" | Out-File -encoding ascii -filepath $keyfile
+
+    if (Test-Path "$KeyFile.pub") {
+        $publicKeyMaterial = cat "$KeyFile.pub" -Raw
+        $encodedPublicKeyMaterial = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($publicKeyMaterial))
+        Import-EC2KeyPair -KeyName $keyName -PublicKeyMaterial $encodedPublicKeyMaterial
+        Write-Verbose "Importing KeyName=$keyName, keyfile=$KeyFile"
+    } else {
+        Write-Verbose "Creating KeyName=$keyName, keyfile=$KeyFile"
+        $keypair = New-EC2KeyPair -KeyName $keyName
+        "$($keypair.KeyMaterial)" | Out-File -encoding ascii -filepath "$KeyFile.pem"
+    }
 }
+
 function SSMRemoveKeypair (
-        [string]$KeyName = 'winec2keypair',
-        [string]$KeyFile = "c:\keys\$((Get-DefaultAWSRegion).Region).$keyName.pem"
+        [string]$KeyFile = 'c:\keys\test'
     )
 {
     #delete keypair
-    del $keyfile -ea 0
     Remove-EC2KeyPair -KeyName $keyName -Force
     Write-Verbose "Removed keypair=$keypair, keyfile=$keyfile"
 }
+
 
 function SSMCreateRole ([string]$RoleName = 'winec2role')
 {
@@ -42,42 +51,6 @@ function SSMCreateRole ([string]$RoleName = 'winec2role')
     ]
 }
 "@
-<#
-    # Define which API actions and resources the application can use 
-    # after assuming the role
-    $policy = @"
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "cloudwatch:PutMetricData",
-        "ds:CreateComputer",
-        "ec2messages:*",
-        "logs:CreateLogGroup",
-        "logs:CreateLogStream",
-        "logs:DescribeLogGroups",
-        "logs:DescribeLogStreams",
-        "logs:PutLogEvents",
-        "s3:PutObject",
-        "s3:GetObject",
-        "s3:AbortMultipartUpload",
-        "s3:ListMultipartUploadParts",
-        "s3:ListBucketMultipartUploads",
-        "ssm:DescribeAssociation",
-        "ssm:ListAssociations",
-        "ssm:GetDocument",
-        "ssm:UpdateAssociationStatus",
-        "ssm:UpdateInstanceInformation",
-        "ec2:DescribeInstanceStatus"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-"@
-#>
     #step a - Create the role and specify who can assume
     $null = New-IAMRole -RoleName $RoleName `
                 -AssumeRolePolicyDocument $assumePolicy
@@ -164,7 +137,7 @@ function SSMCreateSecurityGroup ([string]$SecurityGroupName = 'winec2securitygro
             Write-Verbose "Skipping protocol=$($currentIPRange.IpProtocol) IPRange=$($currentIPRange.IpRanges)"
         } else {
             Revoke-EC2SecurityGroupIngress -GroupId $securityGroupId -IpPermission $currentIPRange
-            Write-Verbose "Revoked permissions protocol=$($currentIPRange.IpProtocol) IPRange=$($currentIPRange.IpRanges)"
+            Write-Verbose "Granted permissions for $($SourceIPRange.IpProtocol) ports $($SourceIPRange.FromPort) to $($SourceIPRange.ToPort), IP=($SourceIPRange.IpRanges[0])"
         }
     }
 
@@ -194,7 +167,7 @@ function SSMRemoveSecurityGroup ([string]$SecurityGroupName = 'winec2securitygro
 
     if ($securityGroupId) {
         SSMWait {(Remove-EC2SecurityGroup $securityGroupId -Force) -eq $null} `
-                'Delete Security Group' 150
+                'Delete Security Group' 300
         Write-Verbose "Security Group $securityGroupName removed"
     } else {
         Write-Verbose "Skipping as SecurityGroup $securityGroupName not found"
@@ -413,6 +386,7 @@ function SSMRunCommand (
         [int]$SleepTimeInMilliSeconds = 2000
     )
 {
+    Write-Verbose "SSMRunCommand: InstanceIds=$InstanceIds, DocumentName=$DocumentName, Outputs3BucketName=$Outputs3BucketName, Outputs3KeyPrefix=$Outputs3KeyPrefix"
     $parameters = @{
         InstanceId = $InstanceIds
         DocumentName = $DocumentName
@@ -499,9 +473,6 @@ function SSMDumpOutput (
         Write-Verbose ''
     }
 }
-
-
-
 
 function SSMWait (
     [ScriptBlock] $Cmd, 
@@ -647,10 +618,11 @@ function SSMEnter-PSSession (
     Enter-PSSession $instance.PublicIpAddress -Credential $creds -Port 80 
 }
 
-function SSMInstallAgent ([string]$ConnectionUri, [System.Management.Automation.PSCredential]$Credential, [string]$Region, [string]$DefaultInstanceName)
+function SSMWindowsInstallAgent ([string]$ConnectionUri, [System.Management.Automation.PSCredential]$Credential, [string]$Region, [string]$DefaultInstanceName)
 {
-    $code = New-SSMActivation -DefaultInstanceName $DefaultInstanceName -IamRole 'test' -RegistrationLimit 1 –Region $region
-
+    Write-Verbose "ConnectionUri=$ConnectionUri, Region=$Region, DefaultInstanceName=$DefaultInstanceName"
+    $code = New-SSMActivation -DefaultInstanceName $DefaultInstanceName -IamRole 'test' -RegistrationLimit 1 –Region $Region
+    Write-Verbose "ActivationCode=$($code.ActivationCode), ActivationId=$($code.ActivationId)"
 
     $sb = {
         param ($Region, $ActivationCode, $ActivationId)
@@ -664,7 +636,7 @@ function SSMInstallAgent ([string]$ConnectionUri, [System.Management.Automation.
         $webclient = New-Object System.Net.WebClient
         $webclient.DownloadFile($source, $dest)
 
-        $a = @('/q', '/log', $log, "CODE=$ActivationCode", "ID=$ActivationId", "REGION=$region", 'ALLOWEC2INSTALL=YES')
+        $a = @('/q', '/log', $log, "CODE=$ActivationCode", "ID=$ActivationId", "REGION=$Region", 'ALLOWEC2INSTALL=YES')
         Start-Process $dest -ArgumentList $a -Wait
         #cat $log
         $st = Get-Content ("$($env:ProgramData)\Amazon\SSM\InstanceData\registration")
@@ -672,9 +644,47 @@ function SSMInstallAgent ([string]$ConnectionUri, [System.Management.Automation.
         Write-Verbose (Get-Service -Name "AmazonSSMAgent")
     }
 
-    Invoke-Command -ScriptBlock $sb -ConnectionUri $ConnectionUri -Credential $Credential -ArgumentList @($region, $code.ActivationCode, $code.ActivationId) -SessionOption (New-PSSessionOption -SkipCACheck)
+    Invoke-Command -ScriptBlock $sb -ConnectionUri $ConnectionUri -Credential $Credential -ArgumentList @($Region, $code.ActivationCode, $code.ActivationId) -SessionOption (New-PSSessionOption -SkipCACheck)
 
+    Remove-SSMActivation $code.ActivationId -Force -Region $Region
 
-    Remove-SSMActivation $code.ActivationId -Force
-    $code.ActivationId
+    $filter = @{Key='ActivationIds'; ValueSet=$code.ActivationId}
+    $InstanceId = (Get-SSMInstanceInformation -InstanceInformationFilterList $filter -Region $Region).InstanceId
+    Write-Verbose "Managed InstanceId=$InstanceId"
+
+    $cmd = { 
+        (Get-SSMInstanceInformation -InstanceInformationFilterList @{ Key='InstanceIds'; ValueSet=$instanceid}).Count -eq 1
+    }
+    $null = Invoke-PSUtilWait $cmd 'Instance Registration' 150
+
+    $instanceId
+}
+
+function SSMLinuxInstallAgent ([string]$Key, [string]$User, [string]$remote, [string]$Port = 22, [string]$IAMRole, [string]$Region, [string]$DefaultInstanceName)
+{
+    Write-Verbose "SSMInstallLinuxAgent:  Key=$Key, User=$User, Remote=$remote, Port=$Port, IAM Role=$IAMRole, SSMRegion=$Region, DefaultInstanceName=$DefaultInstanceName"
+    $global:code = New-SSMActivation -DefaultInstanceName $DefaultInstanceName -IamRole $IAMRole -RegistrationLimit 1 –Region $Region
+
+    $installScript = @"
+    mkdir /tmp/ssm
+    sudo curl https://amazon-ssm-$region.s3.amazonaws.com/latest/debian_amd64/amazon-ssm-agent.deb -o /tmp/ssm/amazon-ssm-agent.deb
+    sudo dpkg -i /tmp/ssm/amazon-ssm-agent.deb
+    sudo stop amazon-ssm-agent
+    sudo amazon-ssm-agent -register -code "$($code.ActivationCode)" -id "$($code.ActivationId)" -region "$region" 
+    sudo start amazon-ssm-agent
+"@
+    $output = Invoke-SSHCommand -key $key -user $user -remote $remote -port $port -cmd $installScript
+    Write-Verbose "sshoutput:`n$output"
+   
+    $filter = @{Key='ActivationIds'; ValueSet=$code.ActivationId}
+    $InstanceId = (Get-SSMInstanceInformation -InstanceInformationFilterList $filter -Region $Region).InstanceId
+
+    Remove-SSMActivation $code.ActivationId -Force -Region $Region
+
+    $cmd = { 
+        (Get-SSMInstanceInformation -InstanceInformationFilterList @{ Key='InstanceIds'; ValueSet=$instanceid}).Count -eq 1
+    }
+    $null = Invoke-PSUtilWait $cmd 'Instance Registration' 150
+
+    $instanceId
 }
