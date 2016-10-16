@@ -5,7 +5,7 @@
 #     $obj - This is a global dictionary, used to pass output values
 #            (e.g.) report the metrics back, or pass output values that will be input to subsequent functions
 
-param ($Region = 'us-east-1')
+param ($Region = 'us-east-1', $instanceId=$instanceId)
 
 Set-DefaultAWSRegion $Region
 . "$PSScriptRoot\Common Setup.ps1"
@@ -13,7 +13,7 @@ Set-DefaultAWSRegion $Region
 #Run Command
 Write-Verbose 'Run Command on EC2 Windows Instance'
 $startTime = Get-Date
-$command = SSMRunCommand  -InstanceIds $obj.'InstanceId' -SleepTimeInMilliSeconds 1000 `
+$command = SSMRunCommand  -InstanceIds $instanceId -SleepTimeInMilliSeconds 1000 `
     -Parameters @{commands='ipconfig'}
 SSMDumpOutput $command
 

@@ -414,7 +414,7 @@ function SSMRunCommand (
     if ($command.Status -ne 'Success') {
         throw "Command $($command.CommandId) did not succeed, Status=$($command.Status)"
     }
-    $result.CommandId
+    $result
 }
 
 
@@ -426,6 +426,7 @@ function SSMDumpOutput (
     $commandId = $Command.CommandId
     $bucket = $Command.OutputS3BucketName
     $key = $Command.OutputS3KeyPrefix
+    Write-Verbose "SSMDumpOutput CommandId=$commandId, Bucket=$bucket, Key=$key"
     foreach ($instanceId in $Command.InstanceIds) {
         Write-Verbose "InstanceId=$instanceId"
         $global:invocation = Get-SSMCommandInvocation -InstanceId $instanceId `

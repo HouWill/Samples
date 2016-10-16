@@ -10,10 +10,10 @@ if (! (Test-PSTestExecuting)) {
 Write-Verbose 'Executing Run'
 
 
-$EC2Linux = $false
-$EC2Windows = $false
+$EC2Linux = $true
+$EC2Windows = $true
 $AzureWindows = $false
-$AzureLinux = $true
+$AzureLinux = $false
 
 
 if ($EC2Linux) {

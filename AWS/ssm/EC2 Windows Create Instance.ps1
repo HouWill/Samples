@@ -28,7 +28,7 @@ $global:instance = New-WinEC2Instance -Name $Name -InstanceType $InstanceType `
                         -IamRoleName 'test' -SecurityGroupName $securityGroup -KeyPairName 'test'
 
 $obj.'InstanceType' = $Instance.Instance.InstanceType
-$Obj.'InstanceId' = $instance.InstanceId
+$global:instanceId = $Obj.'InstanceId' = $instance.InstanceId
 $Obj.'ImageName' = (get-ec2image $instance.Instance.ImageId).Name
 $obj.'PublicIpAddress' = $instance.PublicIpAddress
 $obj.'RemoteTime' = $instance.Time.Remote

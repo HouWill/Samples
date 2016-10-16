@@ -6,7 +6,7 @@
 #            (e.g.) report the metrics back, or pass output values that will be input to subsequent functions
 
 param ($Name = "ssm-linux", $InstanceType = 't2.micro',
-        $ImagePrefix='amzn-ami-hvm-*gp2',$Region = 'us-east-1')
+        $ImagePrefix='amzn-ami-hvm-*gp2',$Region = 'us-east-1', $keyFile = 'c:\keys\test.pem')
 
 Set-DefaultAWSRegion $Region
 . "$PSScriptRoot\Common Setup.ps1"
@@ -45,7 +45,7 @@ $global:instance = New-WinEC2Instance -Name $Name -InstanceType $InstanceType `
                         -UserData $userdata -SSMHeartBeat 
 
 $obj.'InstanceType' = $Instance.Instance.InstanceType
-$Obj.'InstanceId' = $instance.InstanceId
+$global:instanceId = $Obj.'InstanceId' = $instance.InstanceId
 $Obj.'ImageName' = (get-ec2image $instance.Instance.ImageId).Name
 $obj.'PublicIpAddress' = $instance.PublicIpAddress
 $obj.'SSMHeartBeat' = $instance.Time.SSMHeartBeat
