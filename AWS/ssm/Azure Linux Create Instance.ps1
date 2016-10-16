@@ -68,7 +68,7 @@ $cmd = {
         $null = $blob | Get-AzureStorageBlobContent -Force
         $script:log = cat $blob.Name 
         $log | where { $_ -like 'ecdsa-sha2-nistp256*' }}
-$null = Invoke-PSUtilWait -Cmd $cmd -Message 'ecdsa-sha2-nistp256 in log' -PrintAllErrors
+$null = Invoke-PSUtilWait -Cmd $cmd -Message 'ecdsa-sha2-nistp256 in log' 
 #>
 
 

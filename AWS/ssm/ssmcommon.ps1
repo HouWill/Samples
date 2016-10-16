@@ -26,6 +26,7 @@ function SSMRemoveKeypair (
     )
 {
     #delete keypair
+    $keyName = $KeyFile.split('/\')[-1]
     Remove-EC2KeyPair -KeyName $keyName -Force
     Write-Verbose "Removed keypair=$keypair, keyfile=$keyfile"
 }
@@ -45,7 +46,7 @@ function SSMCreateRole ([string]$RoleName = 'winec2role')
       {
         "Sid":"",
         "Effect":"Allow",
-        "Principal":{"Service":["ec2.amazonaws.com", "ssm.amazonaws.com"]},
+        "Principal":{"Service":["ec2.amazonaws.com", "ssm.amazonaws.com", "lambda.amazonaws.com", "kinesisanalytics.amazonaws.com"]},
         "Action":"sts:AssumeRole"
       }
     ]
