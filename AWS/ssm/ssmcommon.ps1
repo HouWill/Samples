@@ -529,7 +529,64 @@ function SSMGetLogs (
     icm $instance.PublicIpAddress $cmd -Credential $Credential -Port 80 > $log
     notepad $log
 }
+
+
 function SSMAssociate (
+    $instance, 
+    [string]$DocumentName = 'AWS-RunPowerShellScript',
+    [Hashtable]$Parameters,
+    [PSCredential] $Credential, 
+    [int]$RetrySeconds = 150,
+    [boolean]$ClearEventLog = $true)
+{
+    $instanceId = $instance.InstanceId
+    $ipaddress = $instance.PublicIpAddress
+
+    Write-Verbose "SSMAssociate: DocumentName=$DocumentName, InstanceId=$instanceId"
+
+    #Only one association is support per instance at this time
+    #Delete the association if it exists.
+    $association = Get-SSMAssociationList -AssociationFilterList @{Key='InstanceId'; Value=$instanceId}
+    if ($association)
+    {
+        Write-Verbose "Removing Association DocumentName=$DocumentName, InstanceId=$instanceId"
+        Remove-SSMAssociation -InstanceId $association.InstanceId `
+            -Name $association.Name -Force
+    }
+
+    if ($ClearEventLog) 
+    {
+        icm $ipaddress {Clear-EventLog -LogName Ec2ConfigService} `
+            -Credential $Credential -Port 80
+    }
+    
+    #assocate the document to the instance
+    $null = New-SSMAssociation -InstanceId $instance.InstanceId -Name $DocumentName
+
+    #apply config
+    $cmd = {& "$env:ProgramFiles\Amazon\Ec2ConfigService\ec2config-cli.exe" -a}
+    $null = icm $ipaddress $cmd -Credential $Credential -Port 80
+
+    #Wait for convergence    
+    $cmd = {
+        $status = (Get-SSMAssociation -InstanceId $instanceid -Name $DocumentName).Status
+        Write-Verbose "Association State=$($status.Name)"
+        $status.Name -eq 'Success' -or $status.Name -eq 'Failed'
+    }
+    $null = SSMWait $cmd -Message 'Converge Association' -RetrySeconds $RetrySeconds
+
+    #Output Status
+    $status = (Get-SSMAssociation -InstanceId $instanceid -Name $DocumentName).Status
+    Write-Verbose "Status=$($status.Name), Message=$($status.Message)"
+    if ($status.Name -ne 'Success')
+    {
+        throw 'SSM Failed'
+    }
+}
+
+
+
+function SSMAssociateOld (
     $instance, 
     [string]$doc, 
     [PSCredential] $Credential, 
@@ -589,6 +646,8 @@ function SSMAssociate (
         throw 'SSM Failed'
     }
 }
+
+
 function SSMGetAssociations ()
 {
     foreach ($i in Get-EC2Instance)

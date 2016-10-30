@@ -3,8 +3,12 @@
 #            When running in parallel, name maps to unique ID.
 #            Some thing like '0', '1', etc when running in parallel
 
-param ($Name = "ssm-linux", $InstanceType = 't2.micro',
-        $ImagePrefix='amzn-ami-hvm-*gp2',$Region = 'us-east-1', $keyFile = 'c:\keys\test.pem')
+param ($Name = "ssm-linux", 
+        $InstanceType = 't2.micro',
+        $ImagePrefix='amzn-ami-hvm-*gp2', 
+        $keyFile = 'c:\keys\test.pem',
+        $InstanceCount=2,
+        $Region = (Get-PSUtilDefaultIfNull -value (Get-DefaultAWSRegion) -defaultValue 'us-east-1'))
 
 Set-DefaultAWSRegion $Regionn
 
@@ -30,24 +34,26 @@ sudo start amazon-ssm-agent
 '@.Replace("`r",'')
 
 $securityGroup = @('test')
-if (Get-EC2SecurityGroup -GroupName 'corp') {
+if (Get-EC2SecurityGroup | ? GroupName -eq 'corp') {
     $securityGroup += 'corp'
 }
 
 Write-Verbose 'Creating EC2 Windows Instance.'
-$global:instance = New-WinEC2Instance -Name $Name -InstanceType $InstanceType `
+$instances = New-WinEC2Instance -Name $Name -InstanceType $InstanceType `
                         -ImagePrefix $ImagePrefix -Linux `
                         -IamRoleName 'test' -SecurityGroupName $securityGroup -KeyPairName 'test' `
-                        -UserData $userdata -SSMHeartBeat 
+                        -UserData $userdata -SSMHeartBeat -InstanceCount $InstanceCount
 
 $obj = @{}
-$obj.'InstanceType' = $Instance.Instance.InstanceType
-$instanceId = $Obj.'InstanceId' = $instance.InstanceId
-$Obj.'ImageName' = (get-ec2image $instance.Instance.ImageId).Name
-$obj.'PublicIpAddress' = $instance.PublicIpAddress
-$obj.'SSMHeartBeat' = $instance.Time.SSMHeartBeat
+$obj.'InstanceType' = $instances[0].Instance.InstanceType
+$Obj.'InstanceId' = $instances.InstanceId
+$Obj.'ImageName' = (get-ec2image $instances[0].Instance.ImageId).Name
+$obj.'PublicIpAddress' = $instances.PublicIpAddress
+$obj.'SSMHeartBeat' = $instances[0].Time.SSMHeartBeat
 
-$output = Invoke-SSHCommand -key $keyFile -user 'ec2-user' -remote $Instance.PublicIpAddress -port 22 -cmd "ps"
-Write-Verbose "SSH Output:`n$output"
+foreach ($instance in $instances) {
+    $output = Invoke-SSHCommand -key $keyFile -user 'ec2-user' -remote $Instance.PublicIpAddress -port 22 -cmd "ps"
+    Write-Verbose "SSH Output for InstanceId=$($instance.InstanceId), PublicIpAddress=$($Instance.PublicIpAddress):`n$output"
+}
 
 return $obj
