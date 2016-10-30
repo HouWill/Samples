@@ -10,7 +10,7 @@ if (! (Test-PSTestExecuting)) {
 Write-Verbose 'Executing Run'
 
 
-$EC2Linux = $true
+$EC2Linux = $false
 $EC2Windows = $true
 $AzureWindows = $false
 $AzureLinux = $false
@@ -32,7 +32,10 @@ if ($EC2Linux) {
 if ($EC2Windows) {
     $tests = @(
         "$PSScriptRoot\EC2 Windows Create Instance.ps1"
-        "$PSScriptRoot\Windows Run Command.ps1"
+        "$PSScriptRoot\RC RunPowerShellScript.ps1"
+        "$PSScriptRoot\RC InstallPowerShellModule.ps1"
+        "$PSScriptRoot\RC InstallApplication.ps1"
+        "$PSScriptRoot\RC ConfigureCloudWatch.ps1"
         "$PSScriptRoot\EC2 Terminate Instance.ps1"
     )
     $InputParameters = @{
@@ -46,7 +49,7 @@ if ($EC2Windows) {
 if ($AzureWindows) {
     $tests = @(
         "$PSScriptRoot\Azure Windows Create Instance.ps1"
-        "$PSScriptRoot\Windows Run Command.ps1"
+        "$PSScriptRoot\Win RunPowerShellScript.ps1"
         "$PSScriptRoot\Azure Terminate Instance.ps1"
     )
     $InputParameters = @{

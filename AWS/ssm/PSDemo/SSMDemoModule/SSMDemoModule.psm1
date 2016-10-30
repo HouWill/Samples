@@ -73,9 +73,7 @@ end
 
 function Test1 ()
 {
-    'Hello this is test1'
-    "#PSTEST# Memory=$($(Get-WmiObject Win32_PhysicalMemoryArray).MaxCapacity/1KB)MB"
-    dir c:\
+    'Hello this is test1 from SSMDemoModule'
 }
 
 

@@ -5,19 +5,23 @@
 #     $obj - This is a global dictionary, used to pass output values
 #            (e.g.) report the metrics back, or pass output values that will be input to subsequent functions
 
-param ($Name = "ssm-linux", $Region = 'us-east-1', $instanceId=$instanceId)
-
+param ($Name = "ssm-linux", $Region = 'us-east-1')
 
 Set-DefaultAWSRegion $Region
-. "$PSScriptRoot\Common Setup.ps1"
+
+$instance = Get-WinEC2Instance $Name -DesiredState 'running'
+$instanceId = $instance.InstanceId
+Write-Verbose "Name=$Name InstanceId=$instanceId"
+
 
 #Run Command
 Write-Verbose 'Run Command on EC2 Windows Instance'
 $startTime = Get-Date
 $command = SSMRunCommand -InstanceIds $instanceId -SleepTimeInMilliSeconds 1000 `
     -DocumentName 'AWS-RunShellScript' -Parameters @{commands='ifconfig'}
-SSMDumpOutput $command
+SSMDumpOutput $command | Write-Verbose
 
+$obj = @{}
 $obj.'CommandId' = $command.CommandId
 $obj.'RunCommandTime' = (Get-Date) - $startTime
 
@@ -79,7 +83,7 @@ function receiveMessage ($sqs, $expectedCommandId, $expectedDocumententName, $ex
         Write-Verbose "Received Message: CommandId=$($json.commandId), DocumententName=$($json.documentName), Status=$($json.status)"
 
         if ($expectedCommandId -ne $json.commandId) {
-            Write-Host 'Eating unexpected commandId' -ForegroundColor Yellow
+            Write-Warning 'Eating unexpected commandId' 
             Remove-SQSMessage -QueueUrl $sqs -ReceiptHandle $message.ReceiptHandle -Force
             continue
         }
@@ -107,7 +111,7 @@ for ($i=0; $i -lt 5; $i++) {
                   -NotificationConfig_NotificationType Invocation `
                   -NotificationConfig_NotificationEvent @('Success', 'TimedOut', 'Cancelled', 'Failed') `
                   -ServiceRoleArn $role.Arn
-    SSMDumpOutput $command
+    SSMDumpOutput $command | Write-Verbose
 
     receiveMessage -sqs $sqs -expectedCommandId $command.CommandId -expectedDocumententName 'AWS-RunShellScript' -expectedStatus 'Success'
     receiveMessage -sqs $sqs -expectedCommandId $command.CommandId -expectedDocumententName 'AWS-RunShellScript' -expectedStatus 'Success'
@@ -123,7 +127,7 @@ for ($i=0; $i -lt 5; $i++) {
                   -NotificationConfig_NotificationType Command `
                   -NotificationConfig_NotificationEvent @('Success', 'TimedOut', 'Cancelled', 'Failed') `
                   -ServiceRoleArn $role.Arn
-    SSMDumpOutput $command
+    SSMDumpOutput $command | Write-Verbose
 
     receiveMessage -sqs $sqs -expectedCommandId $command.CommandId -expectedDocumententName 'AWS-RunShellScript' -expectedStatus 'Success'
 }
@@ -136,3 +140,5 @@ for ($i=0; $i -lt 5; $i++) {
 #
 Remove-SQSQueue -QueueUrl $sqs -Force
 Remove-SNSTopic $topic -Force
+
+return $obj

@@ -138,7 +138,7 @@ function SSMCreateSecurityGroup ([string]$SecurityGroupName = 'winec2securitygro
             Write-Verbose "Skipping protocol=$($currentIPRange.IpProtocol) IPRange=$($currentIPRange.IpRanges)"
         } else {
             Revoke-EC2SecurityGroupIngress -GroupId $securityGroupId -IpPermission $currentIPRange
-            Write-Verbose "Granted permissions for $($SourceIPRange.IpProtocol) ports $($SourceIPRange.FromPort) to $($SourceIPRange.ToPort), IP=($SourceIPRange.IpRanges[0])"
+            Write-Verbose "Granted permissions for $($SourceIPRange.IpProtocol) ports $($SourceIPRange.FromPort) to $($SourceIPRange.ToPort), IP=$($SourceIPRange.IpRanges)"
         }
     }
 
@@ -156,7 +156,7 @@ function SSMCreateSecurityGroup ([string]$SecurityGroupName = 'winec2securitygro
         }
         if (! $found) {
             Grant-EC2SecurityGroupIngress -GroupId $securityGroupId -IpPermissions $SourceIPRange
-            Write-Verbose "Granted permissions for ports 22 to 5986, for IP=($SourceIPRange.IpRanges)"
+            Write-Verbose "Granted permissions for ports 22 to 5986, for IP=$($SourceIPRange.IpRanges)"
         }
     }
 }
@@ -438,9 +438,7 @@ function SSMDumpOutput (
             Write-Verbose "Plugin Status=$($plugin.Status)"
             if ($key.Length -eq 0 -and $plugin.Output.Length -gt 0) { 
                 #if S3 key is defined, this will avoid duplication
-                Write-Verbose "PluginOutput:"
                 $plugin.Output.Trim()
-                Write-Verbose ''
             }
         }
         if ($bucket -and $key) {
@@ -690,3 +688,86 @@ function SSMLinuxInstallAgent ([string]$Key, [string]$User, [string]$remote, [st
 
     $instanceId
 }
+
+function Get-SSMS3Bucket () {
+    $Region = (Get-DefaultAWSRegion).Region
+    if ($Region -eq 'us-east-1') {
+        $Region = ''
+    }
+    foreach ($bucket in (Get-S3Bucket)) {
+        $location = Get-S3BucketLocation -BucketName $bucket.BucketName
+        if ($location.Value -eq $Region) {
+            return $bucket
+        }
+    }
+}
+
+function Test-SSMOuput (
+        $Command,
+        $ExpectedMinLength = 100,
+        $ExpectedMaxLength = 1000,
+        $ExpectdOutput,
+        [boolean]$DeleteS3Keys = $true
+    )
+{
+    $commandId = $Command.CommandId
+    $bucket = $Command.OutputS3BucketName
+    $keyPrefix = $Command.OutputS3KeyPrefix
+    
+    Write-Verbose "SSMDumpOutput CommandId=$commandId, Bucket=$bucket, Key=$keyPrefix, ExpectedMinLength=$ExpectedMinLength, ExpectedMaxLength=$ExpectedMaxLength"
+    foreach ($instanceId in $Command.InstanceIds) {
+        $totalOutputLength = 0
+        Write-Verbose "InstanceId=$instanceId"
+        $global:invocation = Get-SSMCommandInvocation -InstanceId $instanceId `
+                        -CommandId $commandId -Details:$true
+
+        foreach ($plugin in $invocation.CommandPlugins) {
+            Write-Verbose "Plugin Name=$($plugin.Name)"
+            Write-Verbose "ResponseCode=$($plugin.ResponseCode)"
+            Write-Verbose "Plugin Status=$($plugin.Status)"
+
+            $pluginOutput = $plugin.Output
+            if ($pluginOutput) {
+                $pluginOutput = $pluginOutput.Trim()
+            }
+            Write-Verbose "Output from plugin:`n$pluginOutput"
+            $totalOutputLength += $pluginOutput.Length
+
+            if ($bucket -and $keyPrefix) {
+                Write-Verbose ''
+                $key = "$keyPrefix/$commandId/$instanceId/$($plugin.Name.Replace(':',''))/stdout.txt"
+                Write-Verbose "Bucket=$bucket, s3Key=$key"
+
+                $tempFile = [System.IO.Path]::GetTempFileName()
+                $null = Read-S3Object -BucketName $bucket -Key $key -File $tempFile
+                $s3Output = (cat $tempFile -Raw).Trim()
+                del $tempFile -Force
+
+                Write-Verbose "Output from s3:`n$s3Output"
+
+                if ($pluginOutput -eq $s3Output) {
+                    Write-Verbose 'Output matched'
+                } else {
+                    throw 'Output as captured from plugin and s3 did not match'
+                }
+            }
+        }
+
+        if ($bucket -and $keyPrefix -and $DeleteS3Keys) {
+            $s3objects = Get-S3Object -BucketName $bucket -Key "$keyPrefix\$commandId\$instanceId\"
+            foreach ($s3object in $s3objects)
+            {
+                Write-Verbose "Deleting Bucket=$bucket, Key=$($s3object.Key )"
+                $null = Remove-S3Object -BucketName $bucket -Key $s3object.Key -Force
+            }
+        }
+        if ($totalOutputLength -lt $ExpectedMinLength) {
+            throw "TotalOutputLength=$totalOutputLength is less than ExpectedMinLength=$ExpectedMinLength"
+        }
+        if ($totalOutputLength -gt $ExpectedMaxLength) {
+            throw "TotalOutputLength=$totalOutputLength is greater than ExpectedMaxLength=$ExpectedMaxLength"
+        }
+        Write-Verbose "TotalOutputLength=$totalOutputLength"
+    }
+}
+
