@@ -5,7 +5,7 @@
 #     $obj - This is a global dictionary, used to pass output values
 #            (e.g.) report the metrics back, or pass output values that will be input to subsequent functions
 
-param ($Name = 'ssm-windows',
+param ($Name = 'ssm',
         $InstanceType = 't2.micro',
         $ImagePrefix='Windows_Server-2012-R2_RTM-English-64Bit-Base-20',
         $Region = (Get-PSUtilDefaultIfNull -value (Get-DefaultAWSRegion) -defaultValue 'us-east-1')

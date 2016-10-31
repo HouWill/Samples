@@ -5,7 +5,7 @@
 #     $obj - This is a global dictionary, used to pass output values
 #            (e.g.) report the metrics back, or pass output values that will be input to subsequent functions
 
-param ($Name = "ssm-linux", 
+param ($Name = "ssm", 
     $Region = (Get-PSUtilDefaultIfNull -value (Get-DefaultAWSRegion) -defaultValue 'us-east-1'))
 
 Set-DefaultAWSRegion $Region

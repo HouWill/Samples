@@ -3,7 +3,7 @@
 #            When running in parallel, name maps to unique ID.
 #            Some thing like '0', '1', etc when running in parallel
 
-param ($Name = "ssm-linux", 
+param ($Name = "ssm", 
         $InstanceType = 't2.micro',
         $ImagePrefix='amzn-ami-hvm-*gp2', 
         $keyFile = 'c:\keys\test.pem',
@@ -13,6 +13,8 @@ param ($Name = "ssm-linux",
 Set-DefaultAWSRegion $Regionn
 
 Remove-WinEC2Instance $Name -NoWait
+
+ipmo winec2 -Global -Force
 
 #Create Instance
 $userdata = @'
@@ -43,6 +45,7 @@ $instances = New-WinEC2Instance -Name $Name -InstanceType $InstanceType `
                         -ImagePrefix $ImagePrefix -Linux `
                         -IamRoleName 'test' -SecurityGroupName $securityGroup -KeyPairName 'test' `
                         -UserData $userdata -SSMHeartBeat -InstanceCount $InstanceCount
+
 
 $obj = @{}
 $obj.'InstanceType' = $instances[0].Instance.InstanceType

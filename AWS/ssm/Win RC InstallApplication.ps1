@@ -4,7 +4,7 @@
 #            Some thing like '0', '1', etc when running in parallel
 
 
-param ($Name = 'ssm-windows',
+param ($Name = 'ssm',
         $MSIPath1 = 'https://downloads.sourceforge.net/project/sevenzip/7-Zip/15.12/7z1512-x64.msi',
         $MSIPath2 = 'https://downloads.sourceforge.net/project/sevenzip/7-Zip/16.04/7z1604-x64.msi',
         $Region = (Get-PSUtilDefaultIfNull -value (Get-DefaultAWSRegion) -defaultValue 'us-east-1'))

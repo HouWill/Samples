@@ -4,7 +4,7 @@
 #            Some thing like '0', '1', etc when running in parallel
 
 
-param ($Name = 'ssm-windows',
+param ($Name = 'ssm',
         $Region = (Get-PSUtilDefaultIfNull -value (Get-DefaultAWSRegion) -defaultValue 'us-east-1'))
 
 Write-Verbose "Windows Run Command Name=$Name, MSIPath=$MSIPath, Region=$Region"
