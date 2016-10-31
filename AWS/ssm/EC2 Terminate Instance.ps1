@@ -11,6 +11,14 @@ param ($Name = 'ssm',
 
 Set-DefaultAWSRegion $Region
 
+if (Get-CFNStack | ? StackName -eq $Name) {
+    Write-Verbose "Removing CFN Stack $Name"
+    Remove-CFNStack -StackName $Name -Force
+
+    $cmd = { $stack = Get-CFNStack | ? StackName -eq $Name; -not $stack}
+
+    $null = Invoke-PSUtilWait -Cmd $cmd -Message "Remove Stack $Name" -RetrySeconds 300
+}
 
 #Terminate
 Write-verbose "Terminating $Name"
