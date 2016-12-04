@@ -5,7 +5,7 @@
 #     $obj - This is a dictionary, used to pass output values
 #            (e.g.) report the metrics back, or pass output values that will be input to subsequent functions
 
-param ( $Name = '',
+param ( $Name = 'mc-',
         $Region = 'West US',
         $InstanceType = 'Standard_D1_v2', # 'Medium', #'Small',
         $ImagePrefix='Ubuntu Server 14',
@@ -13,8 +13,11 @@ param ( $Name = '',
         $linuxUser='siva',
         $SSMRegion='us-east-1'
 )
+SSMSetTitle "$Name, Azure"
 
-. "$PSScriptRoot\Common Setup.ps1"
+. "$PSScriptRoot\Azure Terminate Instance.ps1" $Name
+
+$obj = @{}
 
 $image = Get-AzureVMImage | ? label -Like "$ImagePrefix*"  | sort PublishedDate -Descending | select -First 1
 Write-Verbose "Image = $($image.Label)"
@@ -25,7 +28,7 @@ if ($image -eq $null) {
 $location = Get-AzureLocation | ? Name -EQ $Region
 Write-Verbose "Location/Region = $($location.Name)"
 
-$name = "mc-$(Get-Random)"
+$Name = "$Name$(Get-Random)"
 Write-Verbose "Service and Instance Name=$name"
 
 #Given it is a test instance, and deleted right, the password is printed. Bad idea for real use case!
@@ -46,7 +49,7 @@ $startTime = Get-Date
 
 $vmName = "linux1"
 
-New-KeyPairs $key
+#New-KeyPairs $key
 
 $azureService = New-AzureService -ServiceName $Name -Location $Region 
 
@@ -60,7 +63,7 @@ $null = New-AzureVMConfig -Name $vmName -InstanceSize $InstanceType -ImageName $
     New-AzureVM -ServiceName $Name -WaitForBoot 
 
 $VM = Get-AzureVM -ServiceName $name -Name $vmName
-$endpoint = Get-AzureEndpoint -VM $VM
+$vmendpoint = Get-AzureEndpoint -VM $VM
 
 <#
 $blob = Get-AzureStorageContainer | Get-AzureStorageBlob | ? name -like "$name*-seriallog.txt"
@@ -72,9 +75,12 @@ $null = Invoke-PSUtilWait -Cmd $cmd -Message 'ecdsa-sha2-nistp256 in log'
 #>
 
 
-Invoke-SSHCommand -key "$key.pem" -user $linuxUser -remote $endpoint.Vip -port $endpoint.Port -cmd "ps"
+$output = Invoke-PsUtilSSHCommand -key "$key.pem" -user $linuxUser -remote $vmendpoint.Vip -port $vmendpoint.Port -cmd "ps"
+$output | Write-Verbose
 
-$Obj.'BootTime' = $runningTime - $startTime
-$Obj.'RemoteTime' = $remoteTime - $startTime
+$Obj.'Time' = (Get-Date) - $startTime
 
-$obj.'InstanceId' =  SSMLinuxInstallAgent -key "$key.pem" -user $linuxUser -remote $endpoint.Vip -port $endpoint.Port -IAMRole 'test' -Region $SSMRegion -DefaultInstanceName $vmName
+$InstanceIds = $obj.'InstanceIds' =  SSMLinuxInstallAgent -key "$key.pem" -user $linuxUser -remote $vmendpoint.Vip -port $vmendpoint.Port -IAMRole 'test' -Region $SSMRegion -DefaultInstanceName $vmName
+Write-Verbose "InstanceIds=$InstanceIds"
+
+return $obj

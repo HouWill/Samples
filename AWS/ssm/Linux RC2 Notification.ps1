@@ -1,19 +1,16 @@
-﻿# You should define before running this script.
-#    $name - Name identifies logfile and test name in results
-#            When running in parallel, name maps to unique ID.
-#            Some thing like '0', '1', etc when running in parallel
-#     $obj - This is a global dictionary, used to pass output values
-#            (e.g.) report the metrics back, or pass output values that will be input to subsequent functions
-
-param ($Name = "ssm", 
-    $Region = (Get-PSUtilDefaultIfNull -value (Get-DefaultAWSRegion) -defaultValue 'us-east-1'))
+﻿param (
+    $Name = (Get-PSUtilDefaultIfNull -value $Name -defaultValue 'ssmlinux'), 
+    $InstanceIds = $InstanceIds,
+    $Region = (Get-PSUtilDefaultIfNull -value (Get-DefaultAWSRegion) -defaultValue 'us-east-1')
+    )
 
 Set-DefaultAWSRegion $Region
 
-$instance = Get-WinEC2Instance $Name -DesiredState 'running'
-$instanceId = $instance.InstanceId
-Write-Verbose "Name=$Name InstanceId=$instanceId"
-
+if ($InstanceIds.Count -eq 0) {
+    Write-Verbose "InstanceIds is empty, retreiving instance with Name=$Name"
+    $InstanceIds = (Get-WinEC2Instance $Name -DesiredState 'running').InstanceId
+}
+Write-Verbose "Linux RC Notification: Name=$Name, InstanceId=$instanceIds"
 
 #
 #Notification setup
@@ -25,7 +22,7 @@ $topic = New-SNSTopic -Name $name
 Write-Verbose "Topic=$topic"
 
 Write-Verbose "Create SQS Queue $name"
-$sqs = New-SQSQueue $name
+$sqs = Invoke-PSUtilWait -cmd {New-SQSQueue $name} -Message 'Create SQS' -RetrySeconds 120 # can't be recreated right after delete, need to wait for 60 sec
 $sqsArn = (Get-SQSQueueAttribute $sqs -AttributeName 'QueueArn').QueueARN
 Write-Verbose "QueueUrl=$sqs, Arn=$sqsArn"
 
@@ -71,7 +68,7 @@ function receiveMessage ($sqs, $expectedCommandId, $expectedDocumententName, $ex
         Write-Verbose "Received Message: CommandId=$($json.commandId), InstanceId=$($json.InstanceId) DocumententName=$($json.documentName), Status=$($json.status)"
 
         if ($expectedCommandId -ne $json.commandId) {
-            Write-Warning 'Eating unexpected commandId' 
+            Write-Warning "Eating unexpected commandId, Received CommandId=$($json.commandId), Expected=$expectedCommandId"
             Remove-SQSMessage -QueueUrl $sqs -ReceiptHandle $message.ReceiptHandle -Force
             continue
         }
@@ -80,11 +77,25 @@ function receiveMessage ($sqs, $expectedCommandId, $expectedDocumententName, $ex
             throw "Did not match with EXPECTED: CommandId=$expectedCommandId, DocumententName=$expectedDocumententName, Status=$expectedStatus"
         }
 
-        Write-Verbose 'Removing the message'
         Remove-SQSMessage -QueueUrl $sqs -ReceiptHandle $message.ReceiptHandle -Force
+        Write-Verbose "Removed Message: CommandId=$($json.commandId), InstanceId=$($json.InstanceId)"
         return
     }
     throw "Receive Message Failed: EXPECTED: CommandId=$expectedCommandId, DocumententName=$expectedDocumententName, Status=$expectedStatus"
+}
+
+
+function queueShouldBeEmpty ($sqs)
+{
+        $message = Receive-SQSMessage -QueueUrl $sqs -WaitTimeInSeconds 2
+        if ($message) {
+            $json = ConvertFrom-Json (ConvertFrom-Json $message.Body).Message
+            Write-Verbose "Received Message: CommandId=$($json.commandId), InstanceId=$($json.InstanceId) DocumententName=$($json.documentName), Status=$($json.status)"
+            $json | fl *
+            throw "Unexpected message"
+        } else {
+            Write-Verbose 'Queue is empty as expected'
+        }
 }
 
 
@@ -92,26 +103,28 @@ function receiveMessage ($sqs, $expectedCommandId, $expectedDocumententName, $ex
 #
 #Run Command with invocation notification
 #
-for ($i=0; $i -lt 5; $i++) {
-    Write-Verbose "Sending Command ifconfig InstanceId=$instanceId"
-    $command = Send-SSMCommand -InstanceIds $instanceId -DocumentName 'AWS-RunShellScript' -Parameters @{commands='ifconfig'} `
+#Clear-SQSQueue $sqs
+for ($i=0; $i -lt 2; $i++) {
+    $command = Send-SSMCommand -InstanceIds $InstanceIds -DocumentName 'AWS-RunShellScript' -Parameters @{commands='ifconfig'} `
                   -NotificationConfig_NotificationArn $topic `
                   -NotificationConfig_NotificationType Invocation `
                   -NotificationConfig_NotificationEvent @('Success', 'TimedOut', 'Cancelled', 'Failed') `
                   -ServiceRoleArn $role.Arn
+    Write-Verbose "#$i Sending Command ifconfig CommandId=$($command.CommandId), InstanceId=$InstanceIds"
 
-    for ($j=0; $j -lt 2*$instance.Count; $j++) {
+    for ($j=0; $j -lt $InstanceIds.Count; $j++) {
         receiveMessage -sqs $sqs -expectedCommandId $command.CommandId -expectedDocumententName 'AWS-RunShellScript' -expectedStatus 'Success'
     }
+    #queueShouldBeEmpty -sqs $sqs
     Test-SSMOuput $command 
 }
 
 #
 #Run Command with Command notification
 #
-for ($i=0; $i -lt 5; $i++) {
-    Write-Verbose "Sending Command ifconfig InstanceId=$instanceId"
-    $command = Send-SSMCommand -InstanceIds $instanceId -DocumentName 'AWS-RunShellScript' -Parameters @{commands='ifconfig'} `
+for ($i=0; $i -lt 2; $i++) {
+    Write-Verbose "#$i Sending Command ifconfig InstanceId=$InstanceIds"
+    $command = Send-SSMCommand -InstanceIds $InstanceIds -DocumentName 'AWS-RunShellScript' -Parameters @{commands='ifconfig'} `
                   -NotificationConfig_NotificationArn $topic `
                   -NotificationConfig_NotificationType Command `
                   -NotificationConfig_NotificationEvent @('Success', 'TimedOut', 'Cancelled', 'Failed') `
@@ -121,8 +134,6 @@ for ($i=0; $i -lt 5; $i++) {
     Test-SSMOuput $command 
 }
 
-#Publish-SNSMessage -Message '"hello"' -TopicArn $topic
-#Clear-SQSQueue -QueueUrl $sqs
 
 #
 #Notification cleanup

@@ -5,8 +5,7 @@ Set-DefaultAWSRegion $DefaultRegion
 
 . "$PSScriptRoot\Common Setup.ps1" -SkipDeletingOutput
 
-Remove-WinEC2Instance 'perf*' -NoWait
-
 SSMRemoveRole -RoleName 'test'
 SSMRemoveKeypair -KeyName 'test'
 SSMRemoveSecurityGroup -SecurityGroupName 'test'
+

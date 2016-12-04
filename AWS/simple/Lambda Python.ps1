@@ -44,19 +44,18 @@ $null = Publish-LMFunction -FunctionZip $zipFile -FunctionName $functionName -Ha
 
 $parameters = @'
 {
-  "key3": "value3",
-  "key2": "value2",
-  "key1": "value1....................."
+  "key1": "value1...",
+  "key2": "value2"
 }
 '@
 
-Get-CWLLogStreams -LogGroupName /aws/lambda/PSLambda | Remove-CWLLogStream -LogGroupName /aws/lambda/PSLambda -Force
+Invoke-PSUtilIgnoreError {Get-CWLLogStreams -LogGroupName /aws/lambda/PSLambda | Remove-CWLLogStream -LogGroupName /aws/lambda/PSLambda -Force}
 
 
 #
 #step 2. Invokes the functions
 #
-$response = Invoke-LMFunction -FunctionName $functionName -Payload $parameters -InvocationType RequestResponse -LogType Tail
+$response = Invoke-LMFunction -FunctionName $functionName -Payload $parameters -InvocationType RequestResponse -LogType Tail 
 
 $json = [System.Text.Encoding]::ASCII.GetString($response.Payload.ToArray())
 $logStreamName = ConvertFrom-Json $json

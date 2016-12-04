@@ -1,4 +1,250 @@
-﻿function SSMCreateKeypair (
+﻿function SSMSetTitle ($Suffix) {
+
+    $map = @{
+        'us-east-1'='IAD (Virginia)'
+        'eu-west-1'='DUB (Ireland)'
+        'us-west-2'='PDX (Oregon)'
+
+        'eu-central-1'='FRA (Frankfurt)'
+        'us-west-1'='SFO (CA)'
+        'sa-east-1'='GRU (Sao Paulo)'
+        'ap-northeast-1'='NRT (Tokyo)'
+        'ap-southeast-1'='SIN (Singapore)'
+        'ap-southeast-2'='SYD (Sydney)'
+        'ap-northeast-2'='ICN (Seoul)'
+    }
+    if ($endpoint) {
+        $title = 'Gamma'
+    } else {
+        $region = (Get-DefaultAWSRegion).Region
+        $title = "$region, $($map.$region)"
+    }
+    if ($Suffix.Length -gt 0) {
+        $title = "$title, $Suffix"
+    }
+    $host.ui.RawUI.WindowTitle = $title
+    if ($psISE) {
+        $psISE.CurrentPowerShellTab.DisplayName = "$($psISE.PowerShellTabs.IndexOf($psISE.CurrentPowerShellTab)). $title"
+    }
+}
+
+function SSMDeleteDocument ([string]$DocumentName) {
+    #delete association
+    foreach ($association in (Get-SSMAssociationList -AssociationFilterList @{Key='Name';Value=$DocumentName})) {
+        Remove-SSMAssociation -AssociationId $association.AssociationId -Force
+        #aws ssm delete-association --association-id $association.AssociationId --endpoint-url $endpoint
+        Write-Verbose "Deleted Association Name=$($association.Name), AssociationId=$($association.AssociationId)"
+    }
+
+    #delete document
+    if (Get-SSMDocumentList -DocumentFilterList @{key='Owner';Value='self'},@{key='Name';Value=$DocumentName}) {
+        Write-Verbose "Delete Document $DocumentName"
+        Remove-SSMDocument -Name $DocumentName -Force
+    } else {
+        Write-Verbose "Skipping to delete Document as $DocumentName not found"
+    }
+}
+
+
+function SSMCreateDocument ([string]$DocumentName, [string]$DocumentContent, [string]$DocumentType = 'Command') {
+#    Write-Verbose "Create SSM Document Name=$DocumentName, Content=`n$DocumentContent"
+    Write-Verbose "Create SSM Document Name=$DocumentName"
+    $DocumentContent = $DocumentContent.Replace("`r",'').Trim()
+    #$DocumentContent | Out-File -Encoding ascii doc.json
+    #$info = aws ssm create-document --name $DocumentName --content file://.\doc.json --document-type $DocumentType --endpoint-url $endpoint
+    $info = New-SSMDocument -Name $DocumentName -Content $DocumentContent -DocumentType $DocumentType
+
+    $d2 =(Get-SSMDocument -Name $DocumentName).Content.Trim()
+    if ($DocumentContent -ne $d2) {
+        throw "$DocumentName content did not match"
+    }
+}
+
+
+function SSMAssociateTarget ([string]$DocumentName, [Hashtable]$Targets, [Hashtable]$Parameters, [string]$Schedule="cron(0 0/30 * 1/1 * ? *)") {
+    $region = (Get-DefaultAWSRegion).Region
+    $bucket = Get-SSMS3Bucket
+    $key=$Targets.'Key'
+
+    $target=$Targets.'Values' <#| ConvertTo-Json
+    if ($Targets.'Values'.Count -eq 1) {
+        $target="[$Target]"
+    }#>
+
+    Write-Verbose ''
+    Write-Verbose "SSMAssociateTarget: Name=$Name, Bucket=$bucket, Key=$key, Target=$target"
+    $inputJson = @"
+        {
+            "Name": "$DocumentName", 
+            "Parameters": $($Parameters | ConvertTo-Json), 
+            "Targets": [
+                {"Key": "$key", "Values": $target}
+            ], 
+            "ScheduleExpression": "$Schedule", 
+            "OutputLocation": {
+                "S3Location": {"OutputS3Region": "$region", "OutputS3BucketName": "$bucket", "OutputS3KeyPrefix": "associate"}
+            }
+        }
+"@
+    #$output = Invoke-AWSCLI -SubCommand 'create-association' -InputJson $inputJson
+    #$output
+
+    New-SSMAssociation -Name $DocumentName -Target @{Key=$Targets.'Key'; Values=$target} -Parameter $Parameters -ScheduleExpression $Schedule `
+        -S3Location_OutputS3Region $region -S3Location_OutputS3BucketName $bucket -S3Location_OutputS3KeyPrefix 'ssm/associate'
+}
+
+
+function SSMReStartAgent ($Instances) {
+    foreach ($instance in $instances) {
+    $cmd = @'
+if [ -f /etc/debian_version ]; then
+        sudo service amazon-ssm-agent stop
+        sudo rm /var/log/amazon/ssm/amazon-ssm-agent.log
+        sudo service amazon-ssm-agent start
+else
+        sudo stop amazon-ssm-agent
+        sudo rm /var/log/amazon/ssm/amazon-ssm-agent.log
+        sudo start amazon-ssm-agent
+fi
+
+'@.Replace("`r",'')
+
+        $publicIpAddress = $instance.PublicIpAddress
+        $output = Invoke-WinEC2Command $instance -Script $cmd
+        Write-Verbose "ssh output:`n$output"
+    }
+}
+
+
+function SSMWaitForMapping([string[]]$InstanceIds, [int]$AssociationCount) {
+    Write-Verbose ''
+
+    foreach ($instanceId in $InstanceIds) {
+        $cmd = {
+            $a = Get-SSMInstanceAssociationsStatus -InstanceId $instanceId
+            Write-Verbose "SSMWaitForMapping Current=$($a.Count), Expected=$AssociationCount, InstanceId=$instanceId"
+            $a.Count -eq $AssociationCount
+        }
+
+        $null = Invoke-PSUtilWait $cmd -Message 'Mapping' -RetrySeconds 50
+    }
+}
+
+function SSMWaitForAssociation([string[]]$InstanceIds, [int]$ExpectedAssociationCount, [int]$MinS3OutputSize = 100, [string]$ContainsString) {
+
+    foreach ($instanceid in $InstanceIds) {
+        Write-Verbose ''
+        Write-Verbose "SSMWaitForAssociation: InstanceId=$instanceid, ExpectedAssociationCount=$ExpectedAssociationCount, S3OutputSize=$size, Min Expected=$MinS3OutputSize"
+        $cmd = {
+            $infos = Get-SSMInstanceAssociationsStatus -InstanceId $instanceid
+            $found = $true
+            foreach ($info in $infos) {
+                Write-Verbose "Status=$($info.Status), InstanceId=$($info.InstanceId), AssociationId=$($info.AssociationId), Current Count=$($infos.Count)"
+                if ($info.Status -ne 'Success') {
+                    $found = $false
+                }
+            }
+            $found -and $infos.Count -eq $ExpectedAssociationCount
+        }
+        $null = Invoke-PSUtilWait $cmd 'Associate Apply' -RetrySeconds 500 -SleepTimeInMilliSeconds 20000
+
+
+        $size = 0
+
+        $infos = Get-SSMInstanceAssociationsStatus -InstanceId $instanceid
+        foreach ($info in $infos) {
+            $association = Get-SSMAssociation -AssociationId $info.AssociationId
+            if ($association.OutputLocation -and $ContainsString.Length -gt 0) {
+                $key = "$($association.OutputLocation.S3Location.OutputS3KeyPrefix)/$instanceid/$($association.AssociationId)/"
+                $bucket=$association.OutputLocation.S3Location.OutputS3BucketName
+            
+                for ($retryCount=0; $retryCount -lt 50; $retryCount++) {
+                    $s3objects = Get-S3Object -BucketName $bucket -KeyPrefix $key
+
+                    if ($s3objects.Count -gt 0) {
+                        break
+                    }
+                    Write-Verbose "Sleeping $bucket/$key Count=$($s3objects.Count)"
+                    Sleep 2
+                }
+                if ($retryCount -ge 5) {
+                    throw "Key count is zero $bucket/$key"
+                }
+                Write-Verbose "$bucket/$key Count=$($s3objects.Count)"
+
+                $found = $false
+                $tempFile = [System.IO.Path]::GetTempFileName()
+                foreach ($s3object in $s3objects)
+                {
+                    $size += $s3object.Size
+                    if ($s3object.Size -gt 3) 
+                    {
+                        #Write-Verbose "$bucket\$($s3object.key):"
+                        $null = Read-S3Object -BucketName $bucket -Key $s3object.Key -File $tempFile
+                        if ($s3object.key.EndsWith('stderr.txt') -or $s3object.key.EndsWith('stderr')) {
+                            cat $tempFile -Raw | Write-Error
+                        } else {
+                            $st = cat $tempFile -Raw 
+                            if ($st.Contains($ContainsString)) {
+                                $found = $true
+                            }
+                            #Write-Verbose "output: '$st'"
+                        }
+                        del $tempFile -Force
+                    }
+                    $null = Remove-S3Object -BucketName $bucket -Key $s3object.Key -Force
+                }
+                if (! $found) {
+                    throw "'$ContainsString' is not found in the output"
+                }
+            }
+        }
+
+        if ($size -lt $MinS3OutputSize) {
+            throw "S3Output is less than expected S3OutputSize=$size, Min Expected=$MinS3OutputSize"
+        }
+    
+        $effectiveAssociations = Get-SSMEffectiveInstanceAssociationList -InstanceId $instanceid -MaxResult 5
+        if ($effectiveAssociations.Count -ne $ExpectedAssociationCount) {
+            throw "Effective Association Count did not match. Expected=$ExpectedAssociationCount, got=$($effectiveAssociations.Count)"
+        }
+    }
+}
+
+function SSMRefreshAssociation ([string[]]$InstanceIds, [string]$AssociationIds) {
+    Write-Verbose ''
+
+    $batchsize = 5
+
+    for ($i = 0; $i -lt $InstanceIds.Count; $i += $batchsize) {
+        $batchInstanceIds = $InstanceIds[$i..($i + $batchsize -1)]
+        Write-Verbose "SSMRefreshAssociation: InstanceIds=$batchInstanceIds, AssociationIds=$AssociationIds"
+        $result = Send-SSMCommand -InstanceId $batchInstanceIds -DocumentName 'AWS-RefreshAssociation' -Parameters @{associationIds=$AssociationIds} -MaxConcurrency '1'
+
+        Write-Verbose "CommandId=$($result.CommandId)"
+
+        $cmd = {
+            $status1 = (Get-SSMCommand -CommandId $result.CommandId).Status
+            ($status1 -ne 'Pending' -and $status1 -ne 'InProgress')
+        }
+        $null = SSMWait -Cmd $cmd -Message 'Command Execution' -RetrySeconds 300 -SleepTimeInMilliSeconds 3000
+    
+        $command = Get-SSMCommand -CommandId $result.CommandId
+        if ($command.Status -ne 'Success') {
+            throw "Command $($command.CommandId) did not succeed, Status=$($command.Status)"
+        }
+
+
+        foreach ($instanceId in $batchInstanceIds) {
+            $invocation = Get-SSMCommandInvocation -InstanceId $InstanceId -CommandId $command.CommandId -Details:$true
+            $output = $invocation.CommandPlugins[0].Output
+            Write-Verbose "RefreshAssociation InstanceId=$instanceId, Output: $output"
+        }
+    }
+}
+
+
+function SSMCreateKeypair (
         [string]$KeyFile = 'c:\keys\test'
     )
 {
@@ -382,7 +628,7 @@ function SSMRunCommand (
         [Hashtable]$Parameters,
         [string]$Comment = $DocumentName,
         [string]$Outputs3BucketName,
-        [string]$Outputs3KeyPrefix = 'ssmoutput',
+        [string]$Outputs3KeyPrefix = 'ssm/command',
         [int]$Timeout = 300,
         [int]$SleepTimeInMilliSeconds = 2000
     )
@@ -412,6 +658,7 @@ function SSMRunCommand (
     
     $command = Get-SSMCommand -CommandId $result.CommandId
     if ($command.Status -ne 'Success') {
+        (Get-SSMCommandInvocation -CommandId $command.CommandId -Detail $true).CommandPlugins | ? Status -eq 'Failed' | select output | Write-Verbose
         throw "Command $($command.CommandId) did not succeed, Status=$($command.Status)"
     }
     $result
@@ -429,7 +676,7 @@ function SSMDumpOutput (
     Write-Verbose "SSMDumpOutput CommandId=$commandId, Bucket=$bucket, Key=$key"
     foreach ($instanceId in $Command.InstanceIds) {
         Write-Verbose "InstanceId=$instanceId"
-        $global:invocation = Get-SSMCommandInvocation -InstanceId $instanceId `
+        $invocation = Get-SSMCommandInvocation -InstanceId $instanceId `
                         -CommandId $commandId -Details:$true
 
         foreach ($plugin in $invocation.CommandPlugins) {
@@ -688,6 +935,8 @@ function SSMWindowsInstallAgent ([string]$ConnectionUri, [System.Management.Auto
 
         Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Force
 
+        #$source = "https://s3.amazonaws.com/sivaiadbucket/Agent/AmazonSSMAgentSetup.exe"
+
         $source = "https://amazon-ssm-$region.s3.amazonaws.com/latest/windows_amd64/AmazonSSMAgentSetup.exe"
         $dest = "$($env:TEMP)\AmazonSSMAgentSetup.exe"
         del $dest -ea 0
@@ -712,7 +961,7 @@ function SSMWindowsInstallAgent ([string]$ConnectionUri, [System.Management.Auto
     Write-Verbose "Managed InstanceId=$InstanceId"
 
     $cmd = { 
-        (Get-SSMInstanceInformation -InstanceInformationFilterList @{ Key='InstanceIds'; ValueSet=$instanceid}).Count -eq 1
+        (Get-SSMInstanceInformation -InstanceInformationFilterList @{ Key='InstanceIds'; ValueSet=$instanceid} -Region $Region).Count -eq 1
     }
     $null = Invoke-PSUtilWait $cmd 'Instance Registration' 150
 
@@ -722,21 +971,22 @@ function SSMWindowsInstallAgent ([string]$ConnectionUri, [System.Management.Auto
 function SSMLinuxInstallAgent ([string]$Key, [string]$User, [string]$remote, [string]$Port = 22, [string]$IAMRole, [string]$Region, [string]$DefaultInstanceName)
 {
     Write-Verbose "SSMInstallLinuxAgent:  Key=$Key, User=$User, Remote=$remote, Port=$Port, IAM Role=$IAMRole, SSMRegion=$Region, DefaultInstanceName=$DefaultInstanceName"
-    $global:code = New-SSMActivation -DefaultInstanceName $DefaultInstanceName -IamRole $IAMRole -RegistrationLimit 1 –Region $Region
-
+    $code = New-SSMActivation -DefaultInstanceName $DefaultInstanceName -IamRole $IAMRole -RegistrationLimit 1 –Region $Region
+    Write-Verbose "ActivationCode=$($code.ActivationCode) ActivationId=$($code.ActivationId)"
     $installScript = @"
-    mkdir /tmp/ssm
-    sudo curl https://amazon-ssm-$region.s3.amazonaws.com/latest/debian_amd64/amazon-ssm-agent.deb -o /tmp/ssm/amazon-ssm-agent.deb
-    sudo dpkg -i /tmp/ssm/amazon-ssm-agent.deb
-    sudo stop amazon-ssm-agent
-    sudo amazon-ssm-agent -register -code "$($code.ActivationCode)" -id "$($code.ActivationId)" -region "$region" 
-    sudo start amazon-ssm-agent
+    mkdir /tmp/ssm 2>&1
+    sudo curl https://amazon-ssm-$region.s3.amazonaws.com/latest/debian_amd64/amazon-ssm-agent.deb -o /tmp/ssm/amazon-ssm-agent.deb 2>&1
+    sudo dpkg -i /tmp/ssm/amazon-ssm-agent.deb 2>&1
+    sudo stop amazon-ssm-agent 2>&1
+    sudo amazon-ssm-agent -register -code "$($code.ActivationCode)" -id "$($code.ActivationId)" -region "$region" -y 2>&1
+    sudo start amazon-ssm-agent 2>&1
 "@
-    $output = Invoke-SSHCommand -key $key -user $user -remote $remote -port $port -cmd $installScript
+    $output = Invoke-PsUtilSSHCommand -key $key -user $user -remote $remote -port $port -cmd $installScript
     Write-Verbose "sshoutput:`n$output"
    
     $filter = @{Key='ActivationIds'; ValueSet=$code.ActivationId}
     $InstanceId = (Get-SSMInstanceInformation -InstanceInformationFilterList $filter -Region $Region).InstanceId
+    Write-Verbose "Managed InstanceId=$InstanceId"
 
     Remove-SSMActivation $code.ActivationId -Force -Region $Region
 
@@ -756,7 +1006,7 @@ function Get-SSMS3Bucket () {
     foreach ($bucket in (Get-S3Bucket)) {
         $location = Get-S3BucketLocation -BucketName $bucket.BucketName
         if ($location.Value -eq $Region) {
-            return $bucket
+            return $bucket.BucketName
         }
     }
 }
@@ -765,7 +1015,7 @@ function Test-SSMOuput (
         $Command,
         $ExpectedMinLength = 100,
         $ExpectedMaxLength = 1000,
-        $ExpectdOutput,
+        $ExpectedOutput,
         [boolean]$DeleteS3Keys = $true
     )
 {
@@ -780,6 +1030,7 @@ function Test-SSMOuput (
         $global:invocation = Get-SSMCommandInvocation -InstanceId $instanceId `
                         -CommandId $commandId -Details:$true
 
+        $found = $false
         foreach ($plugin in $invocation.CommandPlugins) {
             Write-Verbose "Plugin Name=$($plugin.Name)"
             Write-Verbose "ResponseCode=$($plugin.ResponseCode)"
@@ -790,36 +1041,54 @@ function Test-SSMOuput (
                 $pluginOutput = $pluginOutput.Trim()
             }
             Write-Verbose "Output from plugin:`n$pluginOutput"
+            if ($ExpectedOutput -and $pluginOutput -and $pluginOutput.contains($ExpectdOutput)) {
+                #Write-Verbose "Found the expected string '$ExpectedOutput' in output"
+                $found = $true
+            }
             $totalOutputLength += $pluginOutput.Length
 
-            if ($bucket -and $keyPrefix) {
-                Write-Verbose ''
-                $key = "$keyPrefix/$commandId/$instanceId/$($plugin.Name.Replace(':',''))/stdout.txt"
-                Write-Verbose "Bucket=$bucket, s3Key=$key"
-
-                $tempFile = [System.IO.Path]::GetTempFileName()
-                $null = Read-S3Object -BucketName $bucket -Key $key -File $tempFile
-                $s3Output = (cat $tempFile -Raw).Trim()
-                del $tempFile -Force
-
-                Write-Verbose "Output from s3:`n$s3Output"
-
-                if ($pluginOutput -eq $s3Output) {
-                    Write-Verbose 'Output matched'
-                } else {
-                    throw 'Output as captured from plugin and s3 did not match'
-                }
-            }
+        }
+        if (! $found -and $ExpectedOutput.Length -gt 0) {
+            throw "$ExpectedOutput is not found in the output (Plugin)"
         }
 
-        if ($bucket -and $keyPrefix -and $DeleteS3Keys) {
+        if ($bucket -and $keyPrefix) {
+            $totalOutputLength = 0
             $s3objects = Get-S3Object -BucketName $bucket -Key "$keyPrefix\$commandId\$instanceId\"
+            $found = $false
+            $tempFile = [System.IO.Path]::GetTempFileName()
             foreach ($s3object in $s3objects)
             {
-                Write-Verbose "Deleting Bucket=$bucket, Key=$($s3object.Key )"
+                if ($s3object.Size -gt 3) 
+                {
+                    $totalOutputLength += $s3object.Size
+                    #Write-Verbose "$bucket\$($s3object.key):"
+                    $null = Read-S3Object -BucketName $bucket -Key $s3object.Key -File $tempFile
+                    if ($s3object.key.EndsWith('stderr.txt') -or $s3object.key.EndsWith('stderr')) {
+                        cat $tempFile -Raw | Write-Error
+                    } else {
+                        $st = cat $tempFile -Raw 
+                        if ($st.Contains($ExpectedOutput)) {
+                            #Write-Verbose "S3 Found the expected string '$ExpectedOutput' in output"
+                            $found = $true
+                        }
+                        #Write-Verbose "S3 Output"
+                        #$st | Write-Verbose
+                    }
+                    del $tempFile -Force
+                }
                 $null = Remove-S3Object -BucketName $bucket -Key $s3object.Key -Force
+                
+                if ($DeleteS3Keys) {
+                    Write-Verbose "Deleting Bucket=$bucket, Key=$($s3object.Key )"
+                    $null = Remove-S3Object -BucketName $bucket -Key $s3object.Key -Force
+                }
+            }
+            if (! $found -and $ExpectedOutput.Length -gt 0) {
+                throw "$ExpectedOutput is not found in the output (S3)"
             }
         }
+
         if ($totalOutputLength -lt $ExpectedMinLength) {
             throw "TotalOutputLength=$totalOutputLength is less than ExpectedMinLength=$ExpectedMinLength"
         }

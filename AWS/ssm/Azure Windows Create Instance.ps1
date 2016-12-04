@@ -5,15 +5,16 @@
 #     $obj - This is a dictionary, used to pass output values
 #            (e.g.) report the metrics back, or pass output values that will be input to subsequent functions
 
-param ( $Name = '',
+param ( $Name = 'mc-',
         $Region = 'West US',
-        $InstanceType = 'Medium', #'Small',
+        $InstanceType = 'Standard_D1_v2', # 'Medium', #'Small',
         $ImagePrefix='Windows Server 2012 R2',
-        $SSMRegion='us-east-1'
+        $SSMRegion=(Get-PSUtilDefaultIfNull -value (Get-DefaultAWSRegion) -defaultValue 'us-east-1')
         #$ImagePrefix='Windows Server 2016 Technical Preview 5 - Nano Server'
 )
+SSMSetTitle "$Name, Azure"
 
-. "$PSScriptRoot\Common Setup.ps1"
+. "$PSScriptRoot\Azure Terminate Instance.ps1" $Name
 
 $image = Get-AzureVMImage | ? label -Like "$ImagePrefix*"  | select -Last 1
 Write-Verbose "Image = $($image.Label)"
@@ -24,8 +25,10 @@ if ($image -eq $null) {
 $location = Get-AzureLocation | ? Name -EQ $Region
 Write-Verbose "Location/Region = $($location.Name)"
 
-$name = "$($Name)mc-$(Get-Random)"
+$Obj = @{}
+$Name = "$Name$(Get-Random)"
 Write-Verbose "Service and Instance Name=$name"
+
 $Obj.'Name' = $name
 $Obj.'AzureRegion' = $Region
 $Obj.'AzureInstanceType' = $InstanceType
@@ -48,7 +51,7 @@ $null = New-AzureQuickVM -Windows -Name $name -ServiceName $name `
 #PowerShell Remoting
 $uri = Get-AzureWinRMUri -Name $name -ServiceName $name
 $obj.'AzureConnectionUri' = $uri.ToString()
-Write-Verbose "Uri=$($obj.'ConnectionUri')"
+Write-Verbose "Uri=$($obj.'AzureConnectionUri')"
 
 #Skip Certificate Authority check
 #This is because of generated certificate with no trusted root
@@ -70,18 +73,6 @@ Write-Verbose "$($Obj.'RemoteTime') - Remote"
 #Install Onprem Agent
 Write-Verbose 'Install onprem agent on EC2 Windows Instance'
 
-$obj.'InstanceId' =  SSMWindowsInstallAgent -ConnectionUri $uri -Credential $cred -Region $SSMRegion -DefaultInstanceName $Name
+$global:InstanceIds = $obj.'InstanceIds' =  SSMWindowsInstallAgent -ConnectionUri $uri -Credential $cred -Region $SSMRegion -DefaultInstanceName $Name
 
-<#
-
-$filter = @{Key='ActivationIds'; ValueSet=$Obj.'ActivationId'}
-$obj.'InstanceId' = (Get-SSMInstanceInformation -InstanceInformationFilterList $filter -Region $SSMRegion).InstanceId
-
-$startTime = Get-Date
-$command = SSMRunCommand -InstanceIds $mi -SleepTimeInMilliSeconds 1000 `
-    -Parameters @{commands='ipconfig'}
-
-$obj.'OnpremCommandId' = $command
-$obj.'OnpremRunCommandTime' = (Get-Date) - $startTime
-SSMDumpOutput $command
-#>
+return $Obj

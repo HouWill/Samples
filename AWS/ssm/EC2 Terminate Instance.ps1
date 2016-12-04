@@ -1,25 +1,37 @@
-﻿# You should define before running this script.
-#    $name - Name identifies logfile and test name in results
-#            When running in parallel, name maps to unique ID.
-#            Some thing like '0', '1', etc when running in parallel
-#     $obj - This is a global dictionary, used to pass output values
-#            (e.g.) report the metrics back, or pass output values that will be input to subsequent functions
-
-param ($Name = 'ssm', 
-       $Region = (Get-PSUtilDefaultIfNull -value (Get-DefaultAWSRegion) -defaultValue 'us-east-1')
-       )
+﻿param (
+    $Name = (Get-PSUtilDefaultIfNull -value $Name -defaultValue 'ssmlinux'), 
+    $InstanceIds = $InstanceIds,
+    $Region = (Get-PSUtilDefaultIfNull -value (Get-DefaultAWSRegion) -defaultValue 'us-east-1')
+    )
 
 Set-DefaultAWSRegion $Region
 
-if (Get-CFNStack | ? StackName -eq $Name) {
-    Write-Verbose "Removing CFN Stack $Name"
-    Remove-CFNStack -StackName $Name -Force
-
-    $cmd = { $stack = Get-CFNStack | ? StackName -eq $Name; -not $stack}
-
-    $null = Invoke-PSUtilWait -Cmd $cmd -Message "Remove Stack $Name" -RetrySeconds 300
+if ($InstanceIds.Count -eq 0) {
+    Write-Verbose "InstanceIds is empty, retreiving instance with Name=$Name"
+    $InstanceIds = (Get-WinEC2Instance $Name -DesiredState 'running').InstanceId
 }
 
+Write-Verbose "EC2 Terminate: Name=$Name, InstanceIds=$instanceIds"
+
+function CFNDeleteStack ([string]$StackName)
+{
+    if (Get-CFNStack | ? StackName -eq $StackName) {
+        Write-Verbose "Removing CFN Stack $StackName"
+        Remove-CFNStack -StackName $StackName -Force
+
+        $cmd = { $stack = Get-CFNStack | ? StackName -eq $StackName; -not $stack}
+
+        $null = Invoke-PSUtilWait -Cmd $cmd -Message "Remove Stack $StackName" -RetrySeconds 300
+    } else {
+        Write-Verbose "Skipping Remove CFN Stack, as Stack with Name=$StackName not found"
+    }
+}
+
+CFNDeleteStack $Name
+
 #Terminate
-Write-verbose "Terminating $Name"
-Remove-WinEC2Instance $Name -DesiredState 'running' -NoWait
+foreach ($instanceId in $InstanceIds) {
+    Remove-WinEC2Instance $instanceId -NoWait
+}
+
+Remove-WinEC2Instance $Name -NoWait

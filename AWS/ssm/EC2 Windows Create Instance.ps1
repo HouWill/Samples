@@ -5,13 +5,16 @@
 #     $obj - This is a global dictionary, used to pass output values
 #            (e.g.) report the metrics back, or pass output values that will be input to subsequent functions
 
-param ($Name = 'ssm',
+param ($Name = 'ssmwindows',
         $InstanceType = 't2.micro',
-        $ImagePrefix='Windows_Server-2012-R2_RTM-English-64Bit-Base-20',
+        #$ImagePrefix='Windows_Server-2012-R2_RTM-English-64Bit-Base-20',
+        $ImagePrefix='Windows_Server-2016-English-Full-Base-20',
         $Region = (Get-PSUtilDefaultIfNull -value (Get-DefaultAWSRegion) -defaultValue 'us-east-1')
         )
 Write-Verbose "Windows Create Instance Name=$Name, InstanceType=$InstanceType, ImagePrefix=$ImagePrefix, Region=$Region"
 Set-DefaultAWSRegion $Region
+
+SSMSetTitle $Name
 
 Remove-WinEC2Instance $Name -NoWait
 
@@ -28,9 +31,10 @@ $global:instance = New-WinEC2Instance -Name $Name -InstanceType $InstanceType `
 
 $obj = @{}
 $obj.'InstanceType' = $Instance.Instance.InstanceType
-$global:instanceId = $Obj.'InstanceId' = $instance.InstanceId
+$global:InstanceIds = $Obj.'InstanceIds' = $instance.InstanceId
 $Obj.'ImageName' = (get-ec2image $instance.Instance.ImageId).Name
 $obj.'PublicIpAddress' = $instance.PublicIpAddress
 $obj.'RemoteTime' = $instance.Time.Remote
 $obj.'SSMHeartBeat' = $instance.Time.SSMHeartBeat
+
 return $obj

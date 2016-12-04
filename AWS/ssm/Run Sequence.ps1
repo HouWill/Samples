@@ -1,6 +1,12 @@
-﻿param ($Name='ssm')
+﻿param (
+    $Name='ssm',
+    [switch]$EC2Linux = $false,
+    [switch]$EC2Windows = $true,
+    [switch]$AzureWindows = $false,
+    [switch]$AzureLinux = $false
+)
 
-Write-Verbose "Run Sequence - Name=$Name"
+Write-Verbose "Run Sequence - Name=$Name, EC2Linux=$EC2Linux, EC2Windows=$EC2Windows, AzureWindows=$AzureWindows, AzureLinux=$AzureLinux"
 $host.ui.RawUI.WindowTitle = $Name
 
 if (! (Test-PSTestExecuting)) {
@@ -9,39 +15,69 @@ if (! (Test-PSTestExecuting)) {
 
 Write-Verbose 'Executing Run'
 
-
-$EC2Linux = $true
-$EC2Windows = $false
-$AzureWindows = $false
-$AzureLinux = $false
-
-
 if ($EC2Linux) {
     $tests = @(
         "$PSScriptRoot\EC2 Linux Create Instance.ps1"
-        "$PSScriptRoot\Linux RC RunShellScript.ps1"
-        "$PSScriptRoot\Linux RC Notification.ps1"
+        "$PSScriptRoot\Automation 1 Lambda.ps1"
+        "$PSScriptRoot\Inventory1.ps1"
+        "$PSScriptRoot\Linux RC1 RunShellScript.ps1"
+        "$PSScriptRoot\Linux RC2 Notification.ps1"
+        "$PSScriptRoot\Linux RC3 Stress.ps1"
+        "$PSScriptRoot\Linux RC4 Param.ps1"
+        "$PSScriptRoot\Linux RC5 Automation.ps1"
+        "$PSScriptRoot\Linux Associate1 Simple.ps1"
+        "$PSScriptRoot\Linux Associate2 Inventory.ps1"
         "$PSScriptRoot\EC2 Terminate Instance.ps1"
     )
     $InputParameters = @{
-        Name="$Name-linux"
+        Name="$($Name)linux"
         ImagePrefix='amzn-ami-hvm-*gp2'
     }
     Invoke-PsTest -Test $tests -InputParameters $InputParameters  -Count 1 -StopOnError -LogNamePrefix 'EC2 Linux'
+
+
+    $tests = @(
+        "$PSScriptRoot\EC2 Linux Create Instance CFN1.ps1"
+        "$PSScriptRoot\Automation 1 Lambda.ps1"
+        "$PSScriptRoot\Inventory1.ps1"
+        "$PSScriptRoot\Linux RC1 RunShellScript.ps1"
+        "$PSScriptRoot\Linux RC2 Notification.ps1"
+        "$PSScriptRoot\Linux RC3 Stress.ps1"
+        "$PSScriptRoot\Linux RC4 Param.ps1"
+        "$PSScriptRoot\Linux RC5 Automation.ps1"
+        "$PSScriptRoot\EC2 Terminate Instance.ps1"
+    )
+   Invoke-PsTest -Test $tests -InputParameters $InputParameters  -Count 1 -StopOnError -LogNamePrefix 'EC2 Linux CFN1'
+
+
+
+    $tests = @(
+        "$PSScriptRoot\EC2 Linux Create Instance CFN2.ps1"
+        "$PSScriptRoot\Automation 1 Lambda.ps1"
+        "$PSScriptRoot\Inventory1.ps1"
+        "$PSScriptRoot\Linux RC1 RunShellScript.ps1"
+        "$PSScriptRoot\Linux RC2 Notification.ps1"
+        "$PSScriptRoot\Linux RC3 Stress.ps1"
+        "$PSScriptRoot\Linux RC4 Param.ps1"
+        "$PSScriptRoot\Linux RC5 Automation.ps1"
+        "$PSScriptRoot\EC2 Terminate Instance.ps1"
+    )
+    Invoke-PsTest -Test $tests -InputParameters $InputParameters  -Count 1 -StopOnError -LogNamePrefix 'EC2 Linux CFN2'
 }
 
 if ($EC2Windows) {
     $tests = @(
         "$PSScriptRoot\EC2 Windows Create Instance.ps1"
-        "$PSScriptRoot\Win RC RunPowerShellScript.ps1"
-        "$PSScriptRoot\Win RC InstallPowerShellModule.ps1"
-        "$PSScriptRoot\Win RC InstallApplication.ps1"
-        "$PSScriptRoot\Win RC ConfigureCloudWatch.ps1"
+        "$PSScriptRoot\Update SSM Agent.ps1"
+        "$PSScriptRoot\Win RC1 RunPowerShellScript.ps1"
+        "$PSScriptRoot\Win RC2 InstallPowerShellModule.ps1"
+        "$PSScriptRoot\Win RC3 InstallApplication.ps1"
+        "$PSScriptRoot\Win RC4 ConfigureCloudWatch.ps1"
         "$PSScriptRoot\EC2 Terminate Instance.ps1"
     )
     $InputParameters = @{
-        Name="$Name-windows"
-        ImagePrefix='Windows_Server-2012-R2_RTM-English-64Bit-Base-20'
+        Name="$($Name)windows"
+        ImagePrefix='Windows_Server-2016-English-Full-Base-20'
     }
     Invoke-PsTest -Test $tests -InputParameters $InputParameters  -Count 1 -StopOnError -LogNamePrefix 'EC2 Windows'
 }
@@ -50,11 +86,11 @@ if ($EC2Windows) {
 if ($AzureWindows) {
     $tests = @(
         "$PSScriptRoot\Azure Windows Create Instance.ps1"
-        "$PSScriptRoot\Win RunPowerShellScript.ps1"
+        "$PSScriptRoot\Win RC1 RunPowerShellScript.ps1"
         "$PSScriptRoot\Azure Terminate Instance.ps1"
     )
     $InputParameters = @{
-        Name=''
+        Name='mc-'
         ImagePrefix='Windows Server 2012 R2'
     }
     Invoke-PsTest -Test $tests -InputParameters $InputParameters  -Count 1 -StopOnError -LogNamePrefix 'Azure Windows'
@@ -64,11 +100,11 @@ if ($AzureWindows) {
 if ($AzureLinux) {
     $tests = @(
         "$PSScriptRoot\Azure Linux Create Instance.ps1"
-        "$PSScriptRoot\Linux Run Command.ps1"
+        "$PSScriptRoot\Linux RC1 RunShellScript.ps1"
         "$PSScriptRoot\Azure Terminate Instance.ps1"
     )
     $InputParameters = @{
-        Name=''
+        Name='mc-'
         ImagePrefix='Ubuntu Server 14'
     }
     Invoke-PsTest -Test $tests -InputParameters $InputParameters  -Count 1 -StopOnError -LogNamePrefix 'Azure Linux'

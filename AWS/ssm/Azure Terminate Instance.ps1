@@ -5,15 +5,16 @@
 #     $obj - This is a dictionary, used to pass output values
 #            (e.g.) report the metrics back, or pass output values that will be input to subsequent functions
 
-param ( $Name = '')
+param ( $Name = 'mc-')
 
-. "$PSScriptRoot\Common Setup.ps1"
+Write-Verbose "Terminating $Name"
 
-$serviceName = $Obj.'Name'
+$serviceName = (Get-AzureService | ? ServiceName -like "$Name*").ServiceName
 
-Write-Verbose "Terminating $serviceName"
-if ($ServiceName.Length -eq 0) {
-    throw "ServiceName can't be empty"
+if (! $serviceName) {
+
+    Write-Verbose "Skipping as ServiceName with Prefix=$Name is not found"
+    return
 }
 
 $startTime = Get-Date

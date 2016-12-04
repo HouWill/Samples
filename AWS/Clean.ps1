@@ -1,4 +1,12 @@
-﻿trap { break } #This stops execution on any exception
+﻿param (
+    $Region = (Get-PSUtilDefaultIfNull -value (Get-DefaultAWSRegion) -defaultValue 'us-east-1')
+    )
+
+Set-DefaultAWSRegion $Region
+
+Write-Verbose "Clean $Region"
+
+trap { break } #This stops execution on any exception
 $ErrorActionPreference = 'Stop'
 
 function GetRegion ([String]$bucketName) {
@@ -63,18 +71,31 @@ function CleanEC2Instance ([String]$region) {
         }
         if (! $found) {
             Write-Verbose "Terminating Region=$region, Instance=$($instance.InstanceId) $sb"
-            $null = Stop-EC2Instance -Instance $instance.InstanceId -Force -Terminate -Region $region
+               
+            $null = Remove-EC2Instance -Instance $instance.InstanceId -Force -Region $region
         }
     }
 }
 
 $VerbosePreference='Continue'
 
-foreach ($bucket in (Get-S3Bucket)) {
-    $region = GetRegion $bucket.BucketName
+$bucket = Get-SSMS3Bucket
+CleanEC2Instance $region
+CleanS3 $region $bucket 'TestResults'
+CleanS3 $region $bucket 'SSMOutput'
+CleanS3 $region $bucket 'associate'
+CleanS3 $region $bucket 'ssm'
+#CleanEC2Network $region
 
-    CleanEC2Instance $region
-    CleanS3 $region $bucket.BucketName 'TestResults'
-    #CleanEC2Network $region
-}
+
+Get-SSMActivation | % { Remove-SSMActivation -ActivationId $_.ActivationId -Force }
+
+Get-SSMInstanceInformation | ? InstanceId -like 'mi-*' | % { Unregister-SSMManagedInstance -InstanceId $_.InstanceId }
+
+Get-EC2Image -Owner 'self' | Unregister-EC2Image
+Get-EC2Snapshot -OwnerId 'self' | Remove-EC2Snapshot -Force
+
+Get-SSMDocumentList -DocumentFilterList @{key='Owner';Value='self'} | % { SSMDeleteDocument $_.Name }
+
 $VerbosePreference='SilentlyContinue'
+

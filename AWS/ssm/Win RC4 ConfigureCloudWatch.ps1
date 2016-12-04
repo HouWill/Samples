@@ -1,18 +1,16 @@
-﻿# You should define before running this script.
-#    $name - Name identifies logfile and test name in results
-#            When running in parallel, name maps to unique ID.
-#            Some thing like '0', '1', etc when running in parallel
+﻿param (
+    $Name = (Get-PSUtilDefaultIfNull -value $Name -defaultValue 'ssmwindows'), 
+    $InstanceIds = $InstanceIds,
+    $Region = (Get-PSUtilDefaultIfNull -value (Get-DefaultAWSRegion) -defaultValue 'us-east-1')
+    )
 
-
-param ($Name = 'ssm',
-        $Region = (Get-PSUtilDefaultIfNull -value (Get-DefaultAWSRegion) -defaultValue 'us-east-1'))
-
-Write-Verbose "Windows Run Command Name=$Name, MSIPath=$MSIPath, Region=$Region"
 Set-DefaultAWSRegion $Region
 
-$instance = Get-WinEC2Instance $Name -DesiredState 'running'
-$instanceId = $instance.InstanceId
-Write-Verbose "Name=$Name InstanceId=$instanceId"
+if ($InstanceIds.Count -eq 0) {
+    Write-Verbose "InstanceIds is empty, retreiving instance with Name=$Name"
+    $InstanceIds = (Get-WinEC2Instance $Name -DesiredState 'running').InstanceId
+}
+Write-Verbose "Windows RC3 ConfigureCloudWatch: Name=$Name, InstanceId=$instanceIds"
 
 
 $properties = @"
@@ -74,10 +72,9 @@ $properties = @"
 "@
 
 #Run Command
-Write-Verbose 'Run Command - AWS-InstallApplication'
 $startTime = Get-Date
 $command = SSMRunCommand `
-    -InstanceIds $instanceId `
+    -InstanceIds $InstanceIds `
     -DocumentName 'AWS-ConfigureCloudWatch' `
     -Parameters @{
         status="Enabled"
@@ -86,10 +83,10 @@ $command = SSMRunCommand `
 
 $obj = @{}
 $obj.'CommandId' = $command
-$obj.'RunCommandTime' = (Get-Date) - $startTime
 
-Test-SSMOuput $command -ExpectedMinLength 51 -ExpectedMaxLength 51
+Test-SSMOuput $command -ExpectedMinLength 0
 
-
+$obj.'CommandId' = $command.CommandId
+$obj.'Time' = (Get-Date) - $startTime
 
 return $obj
