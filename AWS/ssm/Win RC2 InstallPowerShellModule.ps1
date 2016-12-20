@@ -33,7 +33,7 @@ $command = SSMRunCommand `
     -SleepTimeInMilliSeconds 5000 `
     -Parameters @{
         source="https://s3.amazonaws.com/$S3Bucket/$s3ZipKey"
-        commands=@('Test1')
+        commands=@('ApplyConfiguration')
      } `
      -Outputs3BucketName $s3Bucket -Outputs3KeyPrefix $s3KeyPrefix
 
@@ -42,9 +42,9 @@ $obj.'CommandId' = $command
 $obj.'RunCommandTime' = (Get-Date) - $startTime
 
 
-Test-SSMOuput $command -ExpectedMinLength 0 
+Test-SSMOuput $command -ExpectedMinLength 0  -ExpectedMaxLength 10000
 
-$null = Remove-S3Object -BucketName $S3Bucket -Key $s3ZipKey -Force
+#$null = Remove-S3Object -BucketName $S3Bucket -Key $s3ZipKey -Force
 
 if ($command.OutputS3BucketName -ne $s3Bucket) {
     throw "OutputS3BucketName did not match. Actual Bucket=$($command.OutputS3BucketName), Expected=$s3Bucket, CommandId=$($command.CommandId)"

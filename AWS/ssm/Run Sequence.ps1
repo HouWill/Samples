@@ -1,6 +1,6 @@
 ﻿param (
     $Name='ssm',
-    [switch]$EC2Linux = $false,
+    [switch]$EC2Linux = $true,
     [switch]$EC2Windows = $true,
     [switch]$AzureWindows = $false,
     [switch]$AzureLinux = $false

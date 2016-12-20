@@ -18,13 +18,24 @@ Write-Verbose "Linux RC4 Param: InstanceIds=$InstanceIds, DocumentName=$Document
 $doc = @'
 {
     "schemaVersion": "2.0",
-    "description": "Example instance configuration tasks for 2.0",
+    "description": "Sample Document shows Parameters based on environment",
     "parameters":{
+        "environment":{
+            "type":"String",
+            "description":"(Optional) Define the environment name.",
+            "displayType":"textarea",
+            "default": "test",
+            "allowedValues":[
+                            "test",
+                            "staging",
+                            "production"
+                        ]
+        },
         "hello":{
             "type":"String",
-            "description":"(Optional) List of association ids. If empty, all associations bound to the specified target are applied.",
+            "description":"(Optional) Fetched from parameter store based on environment",
             "displayType":"textarea",
-            "default": "{{ssm:hello}}"
+            "default": "{{ssm:{{environment}}-$Name-hello}}"
         }
     },
     "mainSteps": [
@@ -41,10 +52,14 @@ $doc = @'
 }
 '@
 
+$parameters = @("test-$Name-hello", "production-$Name-hello")
+
 function Cleanup () {
     SSMDeleteDocument $DocumentName
-    if (Get-SSMParameterList -Filter @{Key='Name';Values='hello'}) {
-        Remove-SSMParameter -Name 'hello' -Force
+    foreach ($parameter in $parameters) {
+        if (Get-SSMParameterList -Filter @{Key='Name';Values=$parameter}) {
+            Remove-SSMParameter -Name $parameter -Force
+        }
     }
 }
 Cleanup
@@ -53,11 +68,14 @@ if ($SetupAction -eq 'CleanupOnly') {
 } 
 
 SSMCreateDocument $DocumentName $doc
-Write-SSMParameter -Name 'hello' -Value 'world' -Type String
+foreach ($parameter in $parameters) {
+    Write-Verbose "Create SSM Parameter Name=$parameter"
+    Write-SSMParameter -Name $parameter -Value 'world' -Type String
+}
 
 $startTime = Get-Date
 $command = SSMRunCommand -InstanceIds $InstanceIds -SleepTimeInMilliSeconds 1000 `
-    -DocumentName $DocumentName -Parameters @{hello='{{ssm:hello}}'}
+    -DocumentName $DocumentName -Parameters @{environment='test'}
 
 Test-SSMOuput $command -ExpectedOutput 'world' -ExpectedMinLength 10 
 

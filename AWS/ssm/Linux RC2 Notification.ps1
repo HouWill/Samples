@@ -104,7 +104,8 @@ function queueShouldBeEmpty ($sqs)
 #Run Command with invocation notification
 #
 #Clear-SQSQueue $sqs
-for ($i=0; $i -lt 2; $i++) {
+for ($i=0; $i -lt 0; $i++) {
+    Write-Verbose "`nInvocation Notification: #$i Sending Command ifconfig InstanceId=$InstanceIds"
     $command = Send-SSMCommand -InstanceIds $InstanceIds -DocumentName 'AWS-RunShellScript' -Parameters @{commands='ifconfig'} `
                   -NotificationConfig_NotificationArn $topic `
                   -NotificationConfig_NotificationType Invocation `
@@ -122,13 +123,14 @@ for ($i=0; $i -lt 2; $i++) {
 #
 #Run Command with Command notification
 #
-for ($i=0; $i -lt 2; $i++) {
-    Write-Verbose "#$i Sending Command ifconfig InstanceId=$InstanceIds"
+for ($i=0; $i -lt 5; $i++) {
+    Write-Host "Command Notification: #$i Sending Command ifconfig InstanceId=$InstanceIds" -ForegroundColor Yellow
     $command = Send-SSMCommand -InstanceIds $InstanceIds -DocumentName 'AWS-RunShellScript' -Parameters @{commands='ifconfig'} `
                   -NotificationConfig_NotificationArn $topic `
                   -NotificationConfig_NotificationType Command `
                   -NotificationConfig_NotificationEvent @('Success', 'TimedOut', 'Cancelled', 'Failed') `
                   -ServiceRoleArn $role.Arn
+    Write-Verbose "Sending Command ifconfig CommandId=$($command.CommandId), InstanceId=$InstanceIds"
 
     receiveMessage -sqs $sqs -expectedCommandId $command.CommandId -expectedDocumententName 'AWS-RunShellScript' -expectedStatus 'Success'
     Test-SSMOuput $command 
@@ -139,6 +141,9 @@ for ($i=0; $i -lt 2; $i++) {
 #Notification cleanup
 #
 Remove-SQSQueue -QueueUrl $sqs -Force
+Write-Verbose "Removed SQSQueue $sqs"
+
 Remove-SNSTopic $topic -Force
+Write-Verbose "Removed SNSTopic $topic"
 
 return $obj

@@ -7,8 +7,9 @@
 
 param ($Name = 'ssmwindows',
         $InstanceType = 't2.micro',
-        #$ImagePrefix='Windows_Server-2012-R2_RTM-English-64Bit-Base-20',
-        $ImagePrefix='Windows_Server-2016-English-Full-Base-20',
+        $ImagePrefix='Windows_Server-2012-R2_RTM-English-64Bit-Base-20',
+        #$ImagePrefix='Windows_Server-2016-English-Full-Base-20',
+        $InstanceCount=2,
         $Region = (Get-PSUtilDefaultIfNull -value (Get-DefaultAWSRegion) -defaultValue 'us-east-1')
         )
 Write-Verbose "Windows Create Instance Name=$Name, InstanceType=$InstanceType, ImagePrefix=$ImagePrefix, Region=$Region"
@@ -26,7 +27,7 @@ if (Get-EC2SecurityGroup | ? GroupName -eq 'corp') {
 #Create Instance
 Write-Verbose 'Creating EC2 Windows Instance.'
 $global:instance = New-WinEC2Instance -Name $Name -InstanceType $InstanceType `
-                        -ImagePrefix $ImagePrefix -SSMHeartBeat `
+                        -ImagePrefix $ImagePrefix -SSMHeartBeat  -InstanceCount $InstanceCount `
                         -IamRoleName 'test' -SecurityGroupName $securityGroup -KeyPairName 'test'
 
 $obj = @{}

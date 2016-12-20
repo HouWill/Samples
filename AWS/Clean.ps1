@@ -77,8 +77,6 @@ function CleanEC2Instance ([String]$region) {
     }
 }
 
-$VerbosePreference='Continue'
-
 $bucket = Get-SSMS3Bucket
 CleanEC2Instance $region
 CleanS3 $region $bucket 'TestResults'
@@ -96,6 +94,3 @@ Get-EC2Image -Owner 'self' | Unregister-EC2Image
 Get-EC2Snapshot -OwnerId 'self' | Remove-EC2Snapshot -Force
 
 Get-SSMDocumentList -DocumentFilterList @{key='Owner';Value='self'} | % { SSMDeleteDocument $_.Name }
-
-$VerbosePreference='SilentlyContinue'
-

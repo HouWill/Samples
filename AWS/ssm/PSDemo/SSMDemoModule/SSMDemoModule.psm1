@@ -2,7 +2,7 @@
 # Copyright 2013, Licensed under Apache License 2.0
 #
 
-function OSSetup ($Ensure = "Present")
+function ApplyConfiguration ($Ensure = "Present")
 {
     configuration WebConfig
     {
@@ -11,7 +11,20 @@ function OSSetup ($Ensure = "Present")
             Name="Web-Server"
             Ensure=$Ensure
         }
+
         <#
+        Package package7zip
+        {
+            #Path = "http://hivelocity.dl.sourceforge.net/project/sevenzip/7-Zip/9.22/7z922-x64.msi"
+            Path = 'https://downloads.sourceforge.net/project/sevenzip/7-Zip/16.04/7z1604-x64.msi'
+            Name = "7-Zip 16.04 (x64 edition)"
+            Ensure = "Present"
+            ProductId = ""
+        }
+        Hello h
+        {
+            Message = "Hello World!!"
+        }
         cCreateFileShare CreateShare
         {
             ShareName = 'temp'
@@ -30,6 +43,7 @@ function OSSetup ($Ensure = "Present")
     WebConfig -OutputPath C:\temp\config  -ConfigurationData $AllNodes
     
     Start-DscConfiguration c:\temp\config -ComputerName localhost -Wait -verbose -force
+    'ApplyConfiguration applied successfully!!!'
 }
 
 function ChefInstall ([string]$MSIPath)

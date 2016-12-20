@@ -42,7 +42,7 @@ if ($SetupAction -eq 'SetupOnly') {
     return
 }
 
-
+<#
 #Upgrade
 $command = SSMRunCommand `
     -InstanceIds $InstanceIds `
@@ -60,7 +60,7 @@ $cmd = {
     Test-SSMOuput $command -ExpectedMinLength 0 -ExpectedOutput '7-Zip 16.04 (x64 edition)'
 }
 Invoke-PSUtilRetryOnError -ScriptBlock $cmd -RetryCount 3 -SleepTimeInMilliSeconds 10
-
+#>
 
 
 #Uninstall
@@ -69,7 +69,7 @@ $command = SSMRunCommand `
     -InstanceIds $InstanceIds `
     -DocumentName 'AWS-InstallApplication' `
     -Parameters @{
-        source=$MSIPath2
+        source=$MSIPath1
         action='Uninstall'
      } 
 
