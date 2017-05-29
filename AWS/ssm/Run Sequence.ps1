@@ -1,9 +1,9 @@
 ﻿param (
     $Name='ssm',
-    [switch]$EC2Linux = $true,
-    [switch]$EC2Windows = $true,
+    [switch]$EC2Linux = $false,
+    [switch]$EC2Windows = $false,
     [switch]$AzureWindows = $false,
-    [switch]$AzureLinux = $false
+    [switch]$AzureLinux = $true
 )
 
 Write-Verbose "Run Sequence - Name=$Name, EC2Linux=$EC2Linux, EC2Windows=$EC2Windows, AzureWindows=$AzureWindows, AzureLinux=$AzureLinux"
@@ -47,7 +47,7 @@ if ($EC2Linux) {
         "$PSScriptRoot\Linux RC5 Automation.ps1"
         "$PSScriptRoot\EC2 Terminate Instance.ps1"
     )
-   Invoke-PsTest -Test $tests -InputParameters $InputParameters  -Count 1 -StopOnError -LogNamePrefix 'EC2 Linux CFN1'
+    Invoke-PsTest -Test $tests -InputParameters $InputParameters  -Count 1 -StopOnError -LogNamePrefix 'EC2 Linux CFN1'
 
 
 

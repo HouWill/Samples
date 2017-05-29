@@ -50,7 +50,7 @@ $cmd = {
         $a
     }
 }
-$taskexecution = Invoke-PSUtilWait -Cmd $cmd 'MW Task Complete' 
+$taskexecution = Invoke-PSUtilWait -Cmd $cmd 'MW Task Complete' -PrintVerbose
 
 
 $taskinvocation = Get-SSMMaintenanceWindowExecutionTaskInvocationList -WindowExecutionId $execution.WindowExecutionId -TaskId $taskexecution.TaskExecutionId

@@ -115,7 +115,7 @@ SSMWaitForMapping -InstanceIds $instances.InstanceId -AssociationCount 1
 
 SSMRefreshAssociation $instances.InstanceId ''
 
-SSMWaitForAssociation -InstanceIds $instances.InstanceId -ExpectedAssociationCount 1 -MinS3OutputSize 13 -ContainsString 'Doc1.v2 - one' 
+SSMWaitForAssociation -InstanceIds $instances.InstanceId -ExpectedAssociationCount 1 -MinS3OutputSize 0
 
 
 if ($SetupAction -eq 'SetupOnly') {

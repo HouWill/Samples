@@ -1099,3 +1099,28 @@ function Test-SSMOuput (
     }
 }
 
+function Invoke-AWSCLI () {
+    [CmdletBinding()]
+    Param ([string]$Command='ssm', [string]$SubCommand, [string]$InputJson, $EndpointUrl, [switch]$VerboseInputOutput = $true)
+
+    if ($VerboseInputOutput) {
+        Write-Verbose "Input:`n$InputJson"
+    }
+    Write-Verbose "Command=$Command, SubCommand=$SubCommand, EndPointUrl=$EndpointUrl"
+
+    $tempFile = [System.IO.Path]::GetTempFileName()
+    $InputJson | Out-File -Encoding ascii $tempFile
+
+    if ($EndpointUrl) {
+        $outputJson = aws $command $SubCommand --cli-input-json file://$tempFile --endpoint-url $EndpointUrl | ConvertFrom-Json
+    } else {
+        $outputJson = aws $command $SubCommand --cli-input-json file://$tempFile | ConvertFrom-Json
+    }
+    $outputJson
+
+    if ($VerboseInputOutput) {
+        Write-Verbose "Output:`n$($outputJson | ConvertTo-Json -Depth 5)"
+    }
+
+    del $tempFile -Force -EA 0
+}
