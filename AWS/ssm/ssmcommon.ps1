@@ -227,7 +227,7 @@ function SSMRefreshAssociation ([string[]]$InstanceIds, [string]$AssociationIds)
             $status1 = (Get-SSMCommand -CommandId $result.CommandId).Status
             ($status1 -ne 'Pending' -and $status1 -ne 'InProgress')
         }
-        $null = SSMWait -Cmd $cmd -Message 'Command Execution' -RetrySeconds 300 -SleepTimeInMilliSeconds 3000
+        $null = Invoke-PSUtilWait -Cmd $cmd -Message 'Command Execution' -RetrySeconds 300 -SleepTimeInMilliSeconds 3000
     
         $command = Get-SSMCommand -CommandId $result.CommandId
         if ($command.Status -ne 'Success') {
@@ -413,8 +413,8 @@ function SSMRemoveSecurityGroup ([string]$SecurityGroupName = 'winec2securitygro
         ? { $_.GroupName -eq $securityGroupName }).GroupId
 
     if ($securityGroupId) {
-        SSMWait {(Remove-EC2SecurityGroup $securityGroupId -Force) -eq $null} `
-                'Delete Security Group' 300
+        Invoke-PSUtilWait -Cmd {(Remove-EC2SecurityGroup $securityGroupId -Force) -eq $null} `
+                -Message 'Delete Security Group' -RetrySeconds 300
         Write-Verbose "Security Group $securityGroupName removed"
     } else {
         Write-Verbose "Skipping as SecurityGroup $securityGroupName not found"
@@ -490,7 +490,7 @@ function SSMCreateWindowsInstance (
                     -PemFile $keyfile -Decrypt 
                 $password -ne $null
                 }
-        SSMWait $cmd 'Password Generation' 600
+        Invoke-PSUtilWait -Cmd $cmd -Message 'Password Generation' -RetrySeconds 600
 
         $password = Get-EC2PasswordData -InstanceId $instance.InstanceId `
                         -PemFile $keyfile -Decrypt 
@@ -512,7 +512,7 @@ function SSMCreateWindowsInstance (
         $count = (Get-SSMInstanceInformation -InstanceInformationFilterList @{ Key='InstanceIds'; ValueSet=$instances.InstanceId}).Count
         $count -eq $InstanceCount
     }
-    SSMWait $cmd 'Instance Registration' 300
+    Invoke-PSUtilWait $cmd 'Instance Registration' 300
     $instances.InstanceId
 }
 function SSMCreateLinuxInstance (
@@ -595,7 +595,7 @@ fi
         $count = (Get-SSMInstanceInformation -InstanceInformationFilterList @{ Key='InstanceIds'; ValueSet=$instances.InstanceId}).Count
         $count -eq $InstanceCount
     }
-    SSMWait $cmd 'Instance Registration' 300
+    Invoke-PSUtilWait -Cmd $cmd -Message 'Instance Registration' -RetrySeconds 300
     $instances.InstanceId
 }
 function SSMRemoveInstance (
@@ -654,7 +654,7 @@ function SSMRunCommand (
         $status1 = (Get-SSMCommand -CommandId $result.CommandId).Status
         ($status1 -ne 'Pending' -and $status1 -ne 'InProgress')
     }
-    $null = SSMWait -Cmd $cmd -Message 'Command Execution' -RetrySeconds $Timeout -SleepTimeInMilliSeconds $SleepTimeInMilliSeconds
+    $null = Invoke-PSUtilWait -Cmd $cmd -Message 'Command Execution' -RetrySeconds $Timeout -SleepTimeInMilliSeconds $SleepTimeInMilliSeconds
     
     $command = Get-SSMCommand -CommandId $result.CommandId
     if ($command.Status -ne 'Success') {
@@ -721,6 +721,7 @@ function SSMDumpOutput (
     }
 }
 
+<#
 function SSMWait (
     [ScriptBlock] $Cmd, 
     [string] $Message, 
@@ -758,7 +759,7 @@ function SSMWait (
     }
 }
 
-
+#>
 
 
 
