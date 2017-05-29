@@ -110,6 +110,7 @@ function appState ($app, $action) {
     foreach ($instance in $instances) {
         $cmd = {
             $entries = (Get-SSMInventoryEntriesList -InstanceId $instance.InstanceId -TypeName 'AWS:Application' -Filter @{Key='AWS:Application.Name';Values='bc';Type='Equal'}).Entries
+            Write-Verbose "Inventory Enteries for app=$app, action=$action, Expected=$count, received count=$($entries.Count)"
             $entries.Count -eq $count
         }
         

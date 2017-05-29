@@ -18,7 +18,6 @@ SSMSetTitle "$Name, EC2"
 
 . "$PSScriptRoot\EC2 Terminate Instance.ps1" $Name
 
-
 #Create Instance
 $userdata = @'
 #cloud-config

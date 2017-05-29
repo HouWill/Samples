@@ -1,9 +1,10 @@
 ﻿param (
     $Name='ssm',
-    [switch]$EC2Linux = $false,
+    [switch]$EC2Linux = $true,
     [switch]$EC2Windows = $false,
     [switch]$AzureWindows = $false,
-    [switch]$AzureLinux = $true
+    [switch]$AzureLinux = $false,
+    [switch]$CFN = $false
 )
 
 Write-Verbose "Run Sequence - Name=$Name, EC2Linux=$EC2Linux, EC2Windows=$EC2Windows, AzureWindows=$AzureWindows, AzureLinux=$AzureLinux"
@@ -36,33 +37,35 @@ if ($EC2Linux) {
     Invoke-PsTest -Test $tests -InputParameters $InputParameters  -Count 1 -StopOnError -LogNamePrefix 'EC2 Linux'
 
 
-    $tests = @(
-        "$PSScriptRoot\EC2 Linux Create Instance CFN1.ps1"
-        "$PSScriptRoot\Automation 1 Lambda.ps1"
-        "$PSScriptRoot\Inventory1.ps1"
-        "$PSScriptRoot\Linux RC1 RunShellScript.ps1"
-        "$PSScriptRoot\Linux RC2 Notification.ps1"
-        "$PSScriptRoot\Linux RC3 Stress.ps1"
-        "$PSScriptRoot\Linux RC4 Param.ps1"
-        "$PSScriptRoot\Linux RC5 Automation.ps1"
-        "$PSScriptRoot\EC2 Terminate Instance.ps1"
-    )
-    Invoke-PsTest -Test $tests -InputParameters $InputParameters  -Count 1 -StopOnError -LogNamePrefix 'EC2 Linux CFN1'
+    if ($CFN) {
+        $tests = @(
+            "$PSScriptRoot\EC2 Linux Create Instance CFN1.ps1"
+            "$PSScriptRoot\Automation 1 Lambda.ps1"
+            "$PSScriptRoot\Inventory1.ps1"
+            "$PSScriptRoot\Linux RC1 RunShellScript.ps1"
+            "$PSScriptRoot\Linux RC2 Notification.ps1"
+            "$PSScriptRoot\Linux RC3 Stress.ps1"
+            "$PSScriptRoot\Linux RC4 Param.ps1"
+            "$PSScriptRoot\Linux RC5 Automation.ps1"
+            "$PSScriptRoot\EC2 Terminate Instance.ps1"
+        )
+        Invoke-PsTest -Test $tests -InputParameters $InputParameters  -Count 1 -StopOnError -LogNamePrefix 'EC2 Linux CFN1'
 
 
 
-    $tests = @(
-        "$PSScriptRoot\EC2 Linux Create Instance CFN2.ps1"
-        "$PSScriptRoot\Automation 1 Lambda.ps1"
-        "$PSScriptRoot\Inventory1.ps1"
-        "$PSScriptRoot\Linux RC1 RunShellScript.ps1"
-        "$PSScriptRoot\Linux RC2 Notification.ps1"
-        "$PSScriptRoot\Linux RC3 Stress.ps1"
-        "$PSScriptRoot\Linux RC4 Param.ps1"
-        "$PSScriptRoot\Linux RC5 Automation.ps1"
-        "$PSScriptRoot\EC2 Terminate Instance.ps1"
-    )
-    Invoke-PsTest -Test $tests -InputParameters $InputParameters  -Count 1 -StopOnError -LogNamePrefix 'EC2 Linux CFN2'
+        $tests = @(
+            "$PSScriptRoot\EC2 Linux Create Instance CFN2.ps1"
+            "$PSScriptRoot\Automation 1 Lambda.ps1"
+            "$PSScriptRoot\Inventory1.ps1"
+            "$PSScriptRoot\Linux RC1 RunShellScript.ps1"
+            "$PSScriptRoot\Linux RC2 Notification.ps1"
+            "$PSScriptRoot\Linux RC3 Stress.ps1"
+            "$PSScriptRoot\Linux RC4 Param.ps1"
+            "$PSScriptRoot\Linux RC5 Automation.ps1"
+            "$PSScriptRoot\EC2 Terminate Instance.ps1"
+        )
+        Invoke-PsTest -Test $tests -InputParameters $InputParameters  -Count 1 -StopOnError -LogNamePrefix 'EC2 Linux CFN2'
+    }
 }
 
 if ($EC2Windows) {
