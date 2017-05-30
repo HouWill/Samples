@@ -37,7 +37,7 @@ function SSMTestRunCommand ([string[]]$InstanceIds, [int]$Count=1) {
             $status1 = (Get-SSMCommand -CommandId $result.CommandId).Status
             ($status1 -ne 'Pending' -and $status1 -ne 'InProgress')
         }
-        $null = SSMWait -Cmd $cmd -Message "Command Execution for CommandId=$($result.CommandId)" -RetrySeconds 300 -SleepTimeInMilliSeconds 2000
+        $null = Invoke-PsUtilWait -Cmd $cmd -Message "Command Execution for CommandId=$($result.CommandId)" -RetrySeconds 300 -SleepTimeInMilliSeconds 2000
     
         $command = Get-SSMCommand -CommandId $result.CommandId
         if ($result.CommandId -ne $command.CommandId) {

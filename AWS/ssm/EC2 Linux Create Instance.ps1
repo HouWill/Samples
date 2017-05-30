@@ -106,10 +106,10 @@ $instances = New-WinEC2Instance -Name $Name -InstanceType $InstanceType `
 
 $obj = @{}
 $obj.'InstanceType' = $instances[0].Instance.InstanceType
-$InstanceIds = $Obj.'InstanceId' = $instances.InstanceId
+$InstanceIds = $Obj.'InstanceIds' = $instances.InstanceId
 $Obj.'ImageName' = (get-ec2image $instances[0].Instance.ImageId).Name
 $obj.'PublicIpAddress' = $instances.PublicIpAddress
-$obj.'SSMHeartBeat' = $instances[0].Time.SSMHeartBeat
+$obj.'SSMHeartBeatTime' = $instances[0].Time.SSMHeartBeat
 
 <#
 foreach ($instance in $instances) {

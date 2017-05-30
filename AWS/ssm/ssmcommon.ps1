@@ -146,7 +146,7 @@ function SSMWaitForAssociation([string[]]$InstanceIds, [int]$ExpectedAssociation
             }
             $found -and $infos.Count -eq $ExpectedAssociationCount
         }
-        $null = Invoke-PSUtilWait $cmd 'Associate Apply' -RetrySeconds 500 -SleepTimeInMilliSeconds 20000
+        $null = Invoke-PSUtilWait $cmd 'Associate Apply' -RetrySeconds 500 -SleepTimeInMilliSeconds 30000
 
 
         $size = 0
@@ -227,7 +227,7 @@ function SSMRefreshAssociation ([string[]]$InstanceIds, [string]$AssociationIds)
             $status1 = (Get-SSMCommand -CommandId $result.CommandId).Status
             ($status1 -ne 'Pending' -and $status1 -ne 'InProgress')
         }
-        $null = Invoke-PSUtilWait -Cmd $cmd -Message 'Command Execution' -RetrySeconds 300 -SleepTimeInMilliSeconds 3000
+        $null = Invoke-PSUtilWait -Cmd $cmd -Message 'Command Execution' -RetrySeconds 300 -SleepTimeInMilliSeconds 4000
     
         $command = Get-SSMCommand -CommandId $result.CommandId
         if ($command.Status -ne 'Success') {
@@ -630,7 +630,7 @@ function SSMRunCommand (
         [string]$Outputs3BucketName,
         [string]$Outputs3KeyPrefix = 'ssm/command',
         [int]$Timeout = 300,
-        [int]$SleepTimeInMilliSeconds = 2000
+        [int]$SleepTimeInMilliSeconds = 4000
     )
 {
     Write-Verbose "SSMRunCommand: InstanceIds=$InstanceIds, DocumentName=$DocumentName, Outputs3BucketName=$Outputs3BucketName, Outputs3KeyPrefix=$Outputs3KeyPrefix"

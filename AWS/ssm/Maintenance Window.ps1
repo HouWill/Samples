@@ -42,7 +42,7 @@ if ($SetupAction -eq 'SetupOnly') {
 }       
         
 $cmd = { Get-SSMMaintenanceWindowExecutionList -WindowId $windowId | select -Last 1 }
-$execution = Invoke-PSUtilWait -Cmd $cmd 'MW Execution' -RetrySeconds 500 -PrintVerbose -SleepTimeInMilliSeconds 10000
+$execution = Invoke-PSUtilWait -Cmd $cmd 'MW Execution' -RetrySeconds 500 -PrintVerbose -SleepTimeInMilliSeconds 45000
 
 $cmd = {
     $a = Get-SSMMaintenanceWindowExecutionTaskList -WindowExecutionId $execution.WindowExecutionId

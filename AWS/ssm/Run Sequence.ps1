@@ -1,5 +1,5 @@
 ﻿param (
-    $Name='ssm',
+    $Name=$null,
     [switch]$EC2Linux = $true,
     [switch]$EC2Windows = $false,
     [switch]$AzureWindows = $false,
@@ -28,13 +28,14 @@ if ($EC2Linux) {
         "$PSScriptRoot\Linux RC5 Automation.ps1"
         "$PSScriptRoot\Linux Associate1 Simple.ps1"
         "$PSScriptRoot\Linux Associate2 Inventory.ps1"
+        "$PSScriptRoot\Maintenance Window.ps1"
         "$PSScriptRoot\EC2 Terminate Instance.ps1"
     )
     $InputParameters = @{
-        Name="$($Name)linux"
+        Name="$($Name)ssmlinux"
         ImagePrefix='amzn-ami-hvm-*gp2'
     }
-    Invoke-PsTest -Test $tests -InputParameters $InputParameters  -Count 1 -StopOnError -LogNamePrefix 'EC2 Linux'
+    Invoke-PsTest -Test $tests -InputParameters $InputParameters  -Count 10 -StopOnError -LogNamePrefix 'EC2 Linux'
 
 
     if ($CFN) {
@@ -79,7 +80,7 @@ if ($EC2Windows) {
         "$PSScriptRoot\EC2 Terminate Instance.ps1"
     )
     $InputParameters = @{
-        Name="$($Name)windows"
+        Name="$($Name)ssmwindows"
         ImagePrefix='Windows_Server-2016-English-Full-Base-20'
     }
     Invoke-PsTest -Test $tests -InputParameters $InputParameters  -Count 1 -StopOnError -LogNamePrefix 'EC2 Windows'
