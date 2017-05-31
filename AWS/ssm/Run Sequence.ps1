@@ -18,7 +18,10 @@ Write-Verbose 'Executing Run'
 
 if ($EC2Linux) {
     $tests = @(
-        "$PSScriptRoot\EC2 Linux Create Instance.ps1"
+        @{
+            Test = "$PSScriptRoot\EC2 Linux Create Instance.ps1"
+            Output = @('InstanceIds', 'ImageName')
+        }
         "$PSScriptRoot\Automation 1 Lambda.ps1"
         "$PSScriptRoot\Inventory1.ps1"
         "$PSScriptRoot\Linux RC1 RunShellScript.ps1"
@@ -35,7 +38,7 @@ if ($EC2Linux) {
         Name="$($Name)ssmlinux"
         ImagePrefix='amzn-ami-hvm-*gp2'
     }
-    Invoke-PsTest -Test $tests -InputParameters $InputParameters  -Count 10 -StopOnError -LogNamePrefix 'EC2 Linux'
+    Invoke-PsTest -Test $tests -InputParameters $InputParameters  -OuterRepeat 2 -StopOnError -LogNamePrefix 'EC2 Linux'
 
 
     if ($CFN) {

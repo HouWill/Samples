@@ -52,8 +52,6 @@ if ($SetupAction -eq 'CleanupOnly') {
 
 SSMCreateDocument -DocumentName $DocumentName -DocumentContent $doc -DocumentType 'Automation'
 
-$startTime = Get-Date
-
 $executionid = Start-SSMAutomationExecution -DocumentName $DocumentName
 Write-Verbose "AutomationExecutionId=$executionid"
 
@@ -84,7 +82,6 @@ $command = Get-SSMCommand -CommandId $commandId
 $obj = @{}
 $obj.'CommandId' = $command.CommandId
 $obj.'AutomationExecutionId' = $executionid
-$obj.'Time' = (Get-Date) - $startTime
 
 
 Test-SSMOuput $command
