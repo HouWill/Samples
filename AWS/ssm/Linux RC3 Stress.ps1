@@ -4,7 +4,7 @@ param (
     $Name = (Get-PSUtilDefaultIfNull -value $Name -defaultValue 'ssmlinux'), 
     $InstanceIds = $InstanceIds,
     $IterationCount=2, # Number of times to repeat
-    $Count=5, # Number of send commands in sequence before checking for results
+    $Count=1, # Number of send commands in sequence before checking for results
     $Region = (Get-PSUtilDefaultIfNull -value (Get-DefaultAWSRegion) -defaultValue 'us-east-1')
     )
 
@@ -59,7 +59,7 @@ function SSMTestRunCommand ([string[]]$InstanceIds, [int]$Count=1) {
 }
 
 for ($iteration=1; $iteration -le $IterationCount; $iteration++) {
-    Write-Host "Iteration=$iteration" -ForegroundColor Yellow
+    #Write-Host "Iteration=$iteration" -ForegroundColor Yellow
 
     SSMTestRunCommand $InstanceIds -Count $Count
 }

@@ -109,7 +109,7 @@ $obj.'InstanceType' = $instances[0].Instance.InstanceType
 $InstanceIds = $Obj.'InstanceIds' = $instances.InstanceId
 $Obj.'ImageName' = (get-ec2image $instances[0].Instance.ImageId).Name
 $obj.'PublicIpAddress' = $instances.PublicIpAddress
-$obj.'SSMHeartBeatTime' = $instances[0].Time.SSMHeartBeat
+$obj.'Time' = $instances[0].Time.SSMHeartBeat.ToString() + ' SSM HB Time'
 
 <#
 foreach ($instance in $instances) {

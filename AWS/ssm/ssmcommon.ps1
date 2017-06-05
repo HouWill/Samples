@@ -649,7 +649,7 @@ function SSMRunCommand (
     }
     $result=Send-SSMCommand @parameters 
 
-    Write-Verbose "CommandId=$($result.CommandId)"
+    Write-Verbose "#PSTEST# CommandId=$($result.CommandId)"
     $cmd = {
         $status1 = (Get-SSMCommand -CommandId $result.CommandId).Status
         ($status1 -ne 'Pending' -and $status1 -ne 'InProgress')

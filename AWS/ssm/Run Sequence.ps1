@@ -20,25 +20,31 @@ if ($EC2Linux) {
     $tests = @(
         @{
             Test = "$PSScriptRoot\EC2 Linux Create Instance.ps1"
-            Output = @('InstanceIds', 'ImageName')
+            OutputKeys = @('InstanceIds', 'ImageName')
         }
-        "$PSScriptRoot\Automation 1 Lambda.ps1"
-        "$PSScriptRoot\Inventory1.ps1"
-        "$PSScriptRoot\Linux RC1 RunShellScript.ps1"
+        #"$PSScriptRoot\Automation 1 Lambda.ps1"
+        #"$PSScriptRoot\Inventory1.ps1"
+        @{
+            Test = "$PSScriptRoot\Linux RC1 RunShellScript.ps1"
+            TestRepeat = 2
+            ParallelCount = 2
+        }
+        <#
         "$PSScriptRoot\Linux RC2 Notification.ps1"
         "$PSScriptRoot\Linux RC3 Stress.ps1"
         "$PSScriptRoot\Linux RC4 Param.ps1"
         "$PSScriptRoot\Linux RC5 Automation.ps1"
         "$PSScriptRoot\Linux Associate1 Simple.ps1"
         "$PSScriptRoot\Linux Associate2 Inventory.ps1"
-        "$PSScriptRoot\Maintenance Window.ps1"
+        "$PSScriptRoot\Maintenance Window.ps1" 
+#>
         "$PSScriptRoot\EC2 Terminate Instance.ps1"
     )
     $InputParameters = @{
         Name="$($Name)ssmlinux"
         ImagePrefix='amzn-ami-hvm-*gp2'
     }
-    Invoke-PsTest -Test $tests -InputParameters $InputParameters  -OuterRepeat 2 -StopOnError -LogNamePrefix 'EC2 Linux'
+    Invoke-PsTest -Test $tests -InputParameters $InputParameters  -OuterRepeat 1 -StopOnError -LogNamePrefix 'EC2 Linux'
 
 
     if ($CFN) {

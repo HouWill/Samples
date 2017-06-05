@@ -133,7 +133,7 @@ $startTime = Get-Date
 
 Write-Verbose "Starting Automation $DocumentName"
 $executionid = Start-SSMAutomationExecution -DocumentName $DocumentName 
-Write-Verbose "AutomationExecutionId=$executionid"
+Write-Verbose "#PSTEST# AutomationExecutionId=$executionid"
 
 
 $cmd = {$execution = Get-SSMAutomationExecution -AutomationExecutionId $executionid; Write-Verbose "AutomationExecutionStatus=$($execution.AutomationExecutionStatus)"; $execution.AutomationExecutionStatus -eq 'Success'}
