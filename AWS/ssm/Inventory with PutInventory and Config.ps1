@@ -1,4 +1,7 @@
-﻿param (
+﻿#Directly calls Write-SSMInventory and checks with Config
+#can't be executed in parallel
+
+param (
     $Name = (Get-PSUtilDefaultIfNull -value $Name -defaultValue 'ssmlinux'), 
     $InstanceIds = $InstanceIds,
     $Region = (Get-PSUtilDefaultIfNull -value (Get-DefaultAWSRegion) -defaultValue 'us-east-1')

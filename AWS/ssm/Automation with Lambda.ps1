@@ -1,5 +1,6 @@
 ﻿param (
     $Name = (Get-PSUtilDefaultIfNull -value $Name -defaultValue 'ssmlinux'), 
+    $ParallelIndex,
     $Region = (Get-PSUtilDefaultIfNull -value (Get-DefaultAWSRegion) -defaultValue 'us-east-1'),
     [string] $SetupAction = ''  # SetupOnly or CleanupOnly
     )
@@ -43,7 +44,10 @@
 }
 #>
 
-$DocumentName = "AutomationWithLambda-$Name"
+. $PSScriptRoot\ssmcommon.ps1
+Set-DefaultAWSRegion $Region
+
+$DocumentName = "AutomationWithLambda.$ParallelIndex"
 Write-Verbose "DocumentName=$DocumentName, Region=$Region, SetupAction=$SetupAction"
 
 SSMDeleteDocument $DocumentName
@@ -75,10 +79,10 @@ def lambda_handler(event, context):
     return context.log_stream_name  # Echo back the first key value
 '@
 
-$codeFile = "$($Env:TEMP)\lambda.py"
-$zipFile = "$($Env:TEMP)\lambda.zip"
+$codeFile = "$($Env:TEMP)\lambda$ParallelIndex.py"
+$zipFile = "$($Env:TEMP)\lambda$ParallelIndex.zip"
 del $zipFile -ea 0
-$functionName = 'PSLambda'
+$functionName = "PSLambda$ParallelIndex"
 
 $code | Out-File -Encoding ascii $codeFile
 
@@ -93,8 +97,6 @@ Write-Verbose "Create Python based Lambda function with Name=$functionName"
 $payload = '{"key1": "value1...","key2": "value2"}' | ConvertTo-Json
 
 Invoke-PSUtilIgnoreError {Get-CWLLogStreams -LogGroupName /aws/lambda/PSLambda | Remove-CWLLogStream -LogGroupName /aws/lambda/PSLambda -Force}
-
-
 
 $doc = @"
 {
@@ -121,15 +123,9 @@ $doc = @"
 
 $startTime = Get-Date
 
-#delete if present
-if (Get-SSMDocumentList -DocumentFilterList @{key='Name';Value=$DocumentName}) {
-    Remove-SSMDocument -Name $DocumentName -Force
-}
+SSMDeleteDocument -DocumentName $DocumentName
 
-$ret = New-SSMDocument -Content $doc -DocumentType Automation -Name $DocumentName
-Write-Verbose "Document Name=$DocumentName, Content=`n$doc"
-
-$startTime = Get-Date
+SSMCreateDocument -DocumentName $DocumentName -DocumentContent $doc -DocumentType 'Automation'
 
 Write-Verbose "Starting Automation $DocumentName"
 $executionid = Start-SSMAutomationExecution -DocumentName $DocumentName 
@@ -151,9 +147,8 @@ if ($StatusCode -ne 200) {
 
 $obj = @{}
 $obj.'AutomationExecutionId' = $executionid
-$obj.'Time' = (Get-Date) - $startTime
-
 $obj
+
 if ($SetupAction -eq 'SetupOnly') {
     return $obj
 } 

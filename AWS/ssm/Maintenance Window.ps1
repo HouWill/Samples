@@ -1,20 +1,22 @@
 ﻿param (
     $Name = (Get-PSUtilDefaultIfNull -value $Name -defaultValue 'ssmlinux'), 
+    $ParallelIndex,
     $InstanceIds = $InstanceIds,
     $Region = (Get-PSUtilDefaultIfNull -value (Get-DefaultAWSRegion) -defaultValue 'us-east-1'),
     [string] $SetupAction = ''  # SetupOnly or CleanupOnly
     )
 
+. $PSScriptRoot\ssmcommon.ps1
 Set-DefaultAWSRegion $Region
+$parallelName = "$Name$ParallelIndex"
+$ErrorActionPreference='continue'
+$MWName = "$($parallelName)-MW-Every-Five-Min"
 
 if ($InstanceIds.Count -eq 0) {
-    Write-Verbose "InstanceIds is empty, retreiving instance with Name=$Name"
+    Write-Verbose "InstanceIds is empty, retreiving instance with Name=$Name, ParallelIndex=$ParallelIndex"
     $InstanceIds = (Get-WinEC2Instance $Name -DesiredState 'running').InstanceId
 }
-Write-Verbose "Maintenance Window: Name=$Name, InstanceId=$instanceIds, SetupAction=$SetupAction"
-
-$ErrorActionPreference='continue'
-$MWName = "$($Name)-MW-Every-Five-Min"
+Write-Verbose "Maintenance Window: Name=$Name, InstanceId=$instanceIds, SetupAction=$SetupAction, ParallelIndex=$ParallelIndex"
 
 $window = Get-SSMMaintenanceWindowList -Filter @{Key='Name';Values=$MWName}
 if ($window) {

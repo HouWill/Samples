@@ -8,4 +8,4 @@ Set-DefaultAWSRegion $DefaultRegion
 SSMRemoveRole -RoleName 'test'
 SSMRemoveKeypair -KeyName 'test'
 SSMRemoveSecurityGroup -SecurityGroupName 'test'
-
+Get-SSMAssociationList | % { Remove-SSMAssociation -AssociationId $_.AssociationId -Force }

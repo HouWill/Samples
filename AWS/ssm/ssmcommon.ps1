@@ -28,16 +28,24 @@
     }
 }
 
-function SSMDeleteDocument ([string]$DocumentName) {
+function SSMDeleteAssociation ([string]$DocumentName) {
     #delete association
     foreach ($association in (Get-SSMAssociationList -AssociationFilterList @{Key='Name';Value=$DocumentName})) {
         Remove-SSMAssociation -AssociationId $association.AssociationId -Force
         #aws ssm delete-association --association-id $association.AssociationId --endpoint-url $endpoint
         Write-Verbose "Deleted Association Name=$($association.Name), AssociationId=$($association.AssociationId)"
     }
+}
+
+function SSMDeleteDocument ([string]$DocumentName) {
+
+    SSMDeleteAssociation $DocumentName
+
+    $documents = Get-SSMDocumentList -DocumentFilterList @{key='Owner';Value='self'},@{key='Name';Value=$DocumentName}
+    $documents = $documents | ? { $_.Name -eq $DocumentName }
 
     #delete document
-    if (Get-SSMDocumentList -DocumentFilterList @{key='Owner';Value='self'},@{key='Name';Value=$DocumentName}) {
+    if ($documents) {
         Write-Verbose "Delete Document $DocumentName"
         Remove-SSMDocument -Name $DocumentName -Force
     } else {
@@ -61,7 +69,10 @@ function SSMCreateDocument ([string]$DocumentName, [string]$DocumentContent, [st
 }
 
 
-function SSMAssociateTarget ([string]$DocumentName, [Hashtable]$Targets, [Hashtable]$Parameters, [string]$Schedule="cron(0 0/30 * 1/1 * ? *)") {
+function SSMAssociateTarget ([string]$DocumentName, 
+    [Hashtable]$Targets, [Hashtable]$Parameters, 
+    [string]$Schedule="cron(0 0/30 * 1/1 * ? *)") 
+{
     $region = (Get-DefaultAWSRegion).Region
     $bucket = Get-SSMS3Bucket
     $key=$Targets.'Key'
@@ -115,13 +126,31 @@ fi
     }
 }
 
+function GetSSMInstanceAssociationsStatus(
+    [string]$InstanceId, 
+    $AssociationId = $null,
+    $DocumentName = $null) 
+{
+    $a = Get-SSMInstanceAssociationsStatus -InstanceId $instanceId
+    if ($AssociationId) {
+        $a = $a | ? { $_.AssociationId -eq $AssociationId }
+    }
+    if ($DocumentName) {
+        $a = $a | ? { $_.Name -eq $DocumentName }
+    }
+    Write-Verbose "GetSSMInstanceAssociationsStatus: AssociationId=$AssociationId, DocumentName=$DocumentName, Count=$($a.Count)"
+    return $a
+}
 
-function SSMWaitForMapping([string[]]$InstanceIds, [int]$AssociationCount) {
-    Write-Verbose ''
-
+function SSMWaitForMapping([string[]]$InstanceIds, 
+    [int]$AssociationCount, 
+    $AssociationId = $null,
+    $DocumentName = $null) 
+{
+    Write-Verbose "SSMWaitForMapping: InstanceIds=$instanceids, ExpectedAssociationCount=$AssociationCount, AssociationId=$AssociationId, DocumentName=$DocumentName"
     foreach ($instanceId in $InstanceIds) {
         $cmd = {
-            $a = Get-SSMInstanceAssociationsStatus -InstanceId $instanceId
+            $a = GetSSMInstanceAssociationsStatus -InstanceId $instanceId -AssociationId $AssociationId -DocumentName $DocumentName
             Write-Verbose "SSMWaitForMapping Current=$($a.Count), Expected=$AssociationCount, InstanceId=$instanceId"
             $a.Count -eq $AssociationCount
         }
@@ -130,13 +159,35 @@ function SSMWaitForMapping([string[]]$InstanceIds, [int]$AssociationCount) {
     }
 }
 
-function SSMWaitForAssociation([string[]]$InstanceIds, [int]$ExpectedAssociationCount, [int]$MinS3OutputSize = 100, [string]$ContainsString) {
+function SSMAssociateDeleteS3 ([string]$AssociationId) 
+{
+    Write-Verbose "SSMAssociateDeleteS3 AssociationId=$AssociationId"
+    $association = Get-SSMAssociation -AssociationId $AssociationId
+    if ($association.OutputLocation) {
+        $key = "$($association.OutputLocation.S3Location.OutputS3KeyPrefix)/$instanceid/$($association.AssociationId)/"
+        $bucket=$association.OutputLocation.S3Location.OutputS3BucketName
+            
+        $s3objects = Get-S3Object -BucketName $bucket -KeyPrefix $key
+        Write-Verbose "$bucket/$key Count=$($s3objects.Count)"
+
+        foreach ($s3object in $s3objects) {
+            $null = Remove-S3Object -BucketName $bucket -Key $s3object.Key -Force
+        }
+    }
+}
+
+function SSMWaitForAssociation(
+    [string[]]$InstanceIds, 
+    [int]$ExpectedAssociationCount, 
+    [int]$MinS3OutputSize = 100, 
+    [string]$ContainsString, 
+    $AssociationId = $null,
+    $DocumentName = $null) {
 
     foreach ($instanceid in $InstanceIds) {
-        Write-Verbose ''
-        Write-Verbose "SSMWaitForAssociation: InstanceId=$instanceid, ExpectedAssociationCount=$ExpectedAssociationCount, S3OutputSize=$size, Min Expected=$MinS3OutputSize"
+        Write-Verbose "SSMWaitForAssociation: InstanceId=$instanceid, ExpectedAssociationCount=$ExpectedAssociationCount, S3OutputSize=$size, Min Expected=$MinS3OutputSize, AssociationId=$AssociationId, DocumentName=$DocumentName"
         $cmd = {
-            $infos = Get-SSMInstanceAssociationsStatus -InstanceId $instanceid
+            $infos = GetSSMInstanceAssociationsStatus -InstanceId $instanceid -AssociationId $AssociationId -DocumentName $DocumentName
             $found = $true
             foreach ($info in $infos) {
                 Write-Verbose "Status=$($info.Status), InstanceId=$($info.InstanceId), AssociationId=$($info.AssociationId), Current Count=$($infos.Count)"
@@ -151,10 +202,10 @@ function SSMWaitForAssociation([string[]]$InstanceIds, [int]$ExpectedAssociation
 
         $size = 0
 
-        $infos = Get-SSMInstanceAssociationsStatus -InstanceId $instanceid
+        $infos = GetSSMInstanceAssociationsStatus -InstanceId $instanceid -AssociationId $AssociationId -DocumentName $DocumentName
         foreach ($info in $infos) {
             $association = Get-SSMAssociation -AssociationId $info.AssociationId
-            if ($association.OutputLocation -and $ContainsString.Length -gt 0) {
+            if ($association.OutputLocation -and ($ContainsString.Length -gt 0 -or $MinS3OutputSize -gt 0)) {
                 $key = "$($association.OutputLocation.S3Location.OutputS3KeyPrefix)/$instanceid/$($association.AssociationId)/"
                 $bucket=$association.OutputLocation.S3Location.OutputS3BucketName
             
@@ -165,7 +216,7 @@ function SSMWaitForAssociation([string[]]$InstanceIds, [int]$ExpectedAssociation
                         break
                     }
                     Write-Verbose "Sleeping $bucket/$key Count=$($s3objects.Count)"
-                    Sleep 2
+                    Sleep 5
                 }
                 if ($retryCount -ge 5) {
                     throw "Key count is zero $bucket/$key"
@@ -204,10 +255,11 @@ function SSMWaitForAssociation([string[]]$InstanceIds, [int]$ExpectedAssociation
             throw "S3Output is less than expected S3OutputSize=$size, Min Expected=$MinS3OutputSize"
         }
     
+    <#
         $effectiveAssociations = Get-SSMEffectiveInstanceAssociationList -InstanceId $instanceid -MaxResult 5
         if ($effectiveAssociations.Count -ne $ExpectedAssociationCount) {
             throw "Effective Association Count did not match. Expected=$ExpectedAssociationCount, got=$($effectiveAssociations.Count)"
-        }
+        }#>
     }
 }
 
@@ -1042,7 +1094,7 @@ function Test-SSMOuput (
                 $pluginOutput = $pluginOutput.Trim()
             }
             Write-Verbose "Output from plugin:`n$pluginOutput"
-            if ($ExpectedOutput -and $pluginOutput -and $pluginOutput.contains($ExpectdOutput)) {
+            if ($ExpectedOutput -and $pluginOutput -and $pluginOutput.contains($ExpectedOutput)) {
                 #Write-Verbose "Found the expected string '$ExpectedOutput' in output"
                 $found = $true
             }

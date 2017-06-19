@@ -1,10 +1,12 @@
 ﻿param (
     $Name = (Get-PSUtilDefaultIfNull -value $Name -defaultValue 'ssmlinux'), 
+    $ParallelIndex,
     $InstanceIds = $InstanceIds,
     $Region = (Get-PSUtilDefaultIfNull -value (Get-DefaultAWSRegion) -defaultValue 'us-east-1'),
     [string] $SetupAction = ''  # SetupOnly or CleanupOnly
     )
 
+. $PSScriptRoot\ssmcommon.ps1
 Set-DefaultAWSRegion $Region
 
 if ($InstanceIds.Count -eq 0) {
@@ -41,7 +43,8 @@ $doc = @"
 }
 "@
 
-$DocumentName = "AutomationWithRunCommand-$Name"
+$parallelName = "$Name$ParallelIndex"
+$DocumentName = "AutomationWithRunCommand-$parallelName"
 
 SSMDeleteDocument -DocumentName $DocumentName
 
@@ -53,7 +56,7 @@ if ($SetupAction -eq 'CleanupOnly') {
 SSMCreateDocument -DocumentName $DocumentName -DocumentContent $doc -DocumentType 'Automation'
 
 $executionid = Start-SSMAutomationExecution -DocumentName $DocumentName
-Write-Verbose "AutomationExecutionId=$executionid"
+Write-Verbose "#PsTest# AutomationExecutionId=$executionid"
 
 
 $cmd = {

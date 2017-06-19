@@ -21,23 +21,55 @@ if ($EC2Linux) {
         @{
             PsTest = "$PSScriptRoot\EC2 Linux Create Instance.ps1"
             PsTestOutputKeys = @('InstanceIds', 'ImageName')
+            InstanceCount = 3
         }
-        #"$PSScriptRoot\Automation 1 Lambda.ps1"
-        #"$PSScriptRoot\Inventory1.ps1"
+        
+        
         @{
             PsTest = "$PSScriptRoot\Linux RC1 RunShellScript.ps1"
-            PsTestRepeat = 5
-            PsTestParallelCount = 2
+            PsTestRepeat = 2
+            PsTestParallelCount = 3
         }
-        <#
-        "$PSScriptRoot\Linux RC2 Notification.ps1"
-        "$PSScriptRoot\Linux RC3 Stress.ps1"
-        "$PSScriptRoot\Linux RC4 Param.ps1"
-        "$PSScriptRoot\Linux RC5 Automation.ps1"
-        "$PSScriptRoot\Linux Associate1 Simple.ps1"
-        "$PSScriptRoot\Linux Associate2 Inventory.ps1"
-        "$PSScriptRoot\Maintenance Window.ps1" 
-#>
+        @{
+            PsTest = "$PSScriptRoot\Linux Associate1 with Global Document.ps1"
+            PsTestParallelCount = 5
+            PsTestRepeat = 1
+        }
+        @{
+            PsTest = "$PSScriptRoot\Linux Associate2 with Custom Document.ps1"
+            PsTestParallelCount = 5
+            PsTestRepeat = 1
+        }
+        "$PSScriptRoot\Linux Associate3 Inventory.ps1"
+        "$PSScriptRoot\Inventory with PutInventory and Config.ps1"
+        @{
+            PsTest = "$PSScriptRoot\Automation with Lambda.ps1"
+            PsTestParallelCount = 5
+            PsTestRepeat = 1
+        }
+        @{
+            PsTest = "$PSScriptRoot\Linux RC2 Notification.ps1"
+            PsTestParallelCount = 1#can't do parallel rightnow.
+            PsTestRepeat = 1
+        }
+        @{
+            PsTest = "$PSScriptRoot\Linux RC3 with Parameter Store.ps1"
+            PsTestParallelCount = 5
+            PsTestRepeat = 1
+        }
+   
+        @{
+            PsTest = "$PSScriptRoot\Linux RC4 from Automation.ps1"
+            PsTestParallelCount = 5
+            PsTestRepeat = 1
+        }
+       
+        @{
+            PsTest = "$PSScriptRoot\Maintenance Window.ps1"
+            PsTestParallelCount = 5
+            PsTestRepeat = 1
+        }
+        
         "$PSScriptRoot\EC2 Terminate Instance.ps1"
     )
 
@@ -45,12 +77,12 @@ if ($EC2Linux) {
         Name="$($Name)ssmlinux"
         ImagePrefix='amzn-ami-hvm-*gp2'
 
-        PsTestParameterSetRepeat=1
+       # PsTestParameterSetRepeat=3
         PsTestStopOnError=$true
     }
 
 
-    Invoke-PsTest -Test $tests -Parameters $Parameters -LogNamePrefix 'EC2 Linux'
+    Invoke-PsTest -Test $tests -Parameters $Parameters -LogNamePrefix 'EC2 Linux' 
 
 
     if ($CFN) {
