@@ -28,16 +28,24 @@
     }
 }
 
-function SSMDeleteDocument ([string]$DocumentName) {
+function SSMDeleteAssociation ([string]$DocumentName) {
     #delete association
     foreach ($association in (Get-SSMAssociationList -AssociationFilterList @{Key='Name';Value=$DocumentName})) {
         Remove-SSMAssociation -AssociationId $association.AssociationId -Force
         #aws ssm delete-association --association-id $association.AssociationId --endpoint-url $endpoint
         Write-Verbose "Deleted Association Name=$($association.Name), AssociationId=$($association.AssociationId)"
     }
+}
+
+function SSMDeleteDocument ([string]$DocumentName) {
+
+    SSMDeleteAssociation $DocumentName
+
+    $documents = Get-SSMDocumentList -DocumentFilterList @{key='Owner';Value='self'},@{key='Name';Value=$DocumentName}
+    $documents = $documents | ? { $_.Name -eq $DocumentName }
 
     #delete document
-    if (Get-SSMDocumentList -DocumentFilterList @{key='Owner';Value='self'},@{key='Name';Value=$DocumentName}) {
+    if ($documents) {
         Write-Verbose "Delete Document $DocumentName"
         Remove-SSMDocument -Name $DocumentName -Force
     } else {
@@ -61,7 +69,10 @@ function SSMCreateDocument ([string]$DocumentName, [string]$DocumentContent, [st
 }
 
 
-function SSMAssociateTarget ([string]$DocumentName, [Hashtable]$Targets, [Hashtable]$Parameters, [string]$Schedule="cron(0 0/30 * 1/1 * ? *)") {
+function SSMAssociateTarget ([string]$DocumentName, 
+    [Hashtable]$Targets, [Hashtable]$Parameters, 
+    [string]$Schedule="cron(0 0/30 * 1/1 * ? *)") 
+{
     $region = (Get-DefaultAWSRegion).Region
     $bucket = Get-SSMS3Bucket
     $key=$Targets.'Key'
@@ -115,13 +126,31 @@ fi
     }
 }
 
+function GetSSMInstanceAssociationsStatus(
+    [string]$InstanceId, 
+    $AssociationId = $null,
+    $DocumentName = $null) 
+{
+    $a = Get-SSMInstanceAssociationsStatus -InstanceId $instanceId
+    if ($AssociationId) {
+        $a = $a | ? { $_.AssociationId -eq $AssociationId }
+    }
+    if ($DocumentName) {
+        $a = $a | ? { $_.Name -eq $DocumentName }
+    }
+    Write-Verbose "GetSSMInstanceAssociationsStatus: AssociationId=$AssociationId, DocumentName=$DocumentName, Count=$($a.Count)"
+    return $a
+}
 
-function SSMWaitForMapping([string[]]$InstanceIds, [int]$AssociationCount) {
-    Write-Verbose ''
-
+function SSMWaitForMapping([string[]]$InstanceIds, 
+    [int]$AssociationCount, 
+    $AssociationId = $null,
+    $DocumentName = $null) 
+{
+    Write-Verbose "SSMWaitForMapping: InstanceIds=$instanceids, ExpectedAssociationCount=$AssociationCount, AssociationId=$AssociationId, DocumentName=$DocumentName"
     foreach ($instanceId in $InstanceIds) {
         $cmd = {
-            $a = Get-SSMInstanceAssociationsStatus -InstanceId $instanceId
+            $a = GetSSMInstanceAssociationsStatus -InstanceId $instanceId -AssociationId $AssociationId -DocumentName $DocumentName
             Write-Verbose "SSMWaitForMapping Current=$($a.Count), Expected=$AssociationCount, InstanceId=$instanceId"
             $a.Count -eq $AssociationCount
         }
@@ -130,13 +159,35 @@ function SSMWaitForMapping([string[]]$InstanceIds, [int]$AssociationCount) {
     }
 }
 
-function SSMWaitForAssociation([string[]]$InstanceIds, [int]$ExpectedAssociationCount, [int]$MinS3OutputSize = 100, [string]$ContainsString) {
+function SSMAssociateDeleteS3 ([string]$AssociationId) 
+{
+    Write-Verbose "SSMAssociateDeleteS3 AssociationId=$AssociationId"
+    $association = Get-SSMAssociation -AssociationId $AssociationId
+    if ($association.OutputLocation) {
+        $key = "$($association.OutputLocation.S3Location.OutputS3KeyPrefix)/$instanceid/$($association.AssociationId)/"
+        $bucket=$association.OutputLocation.S3Location.OutputS3BucketName
+            
+        $s3objects = Get-S3Object -BucketName $bucket -KeyPrefix $key
+        Write-Verbose "$bucket/$key Count=$($s3objects.Count)"
+
+        foreach ($s3object in $s3objects) {
+            $null = Remove-S3Object -BucketName $bucket -Key $s3object.Key -Force
+        }
+    }
+}
+
+function SSMWaitForAssociation(
+    [string[]]$InstanceIds, 
+    [int]$ExpectedAssociationCount, 
+    [int]$MinS3OutputSize = 100, 
+    [string]$ContainsString, 
+    $AssociationId = $null,
+    $DocumentName = $null) {
 
     foreach ($instanceid in $InstanceIds) {
-        Write-Verbose ''
-        Write-Verbose "SSMWaitForAssociation: InstanceId=$instanceid, ExpectedAssociationCount=$ExpectedAssociationCount, S3OutputSize=$size, Min Expected=$MinS3OutputSize"
+        Write-Verbose "SSMWaitForAssociation: InstanceId=$instanceid, ExpectedAssociationCount=$ExpectedAssociationCount, S3OutputSize=$size, Min Expected=$MinS3OutputSize, AssociationId=$AssociationId, DocumentName=$DocumentName"
         $cmd = {
-            $infos = Get-SSMInstanceAssociationsStatus -InstanceId $instanceid
+            $infos = GetSSMInstanceAssociationsStatus -InstanceId $instanceid -AssociationId $AssociationId -DocumentName $DocumentName
             $found = $true
             foreach ($info in $infos) {
                 Write-Verbose "Status=$($info.Status), InstanceId=$($info.InstanceId), AssociationId=$($info.AssociationId), Current Count=$($infos.Count)"
@@ -146,15 +197,15 @@ function SSMWaitForAssociation([string[]]$InstanceIds, [int]$ExpectedAssociation
             }
             $found -and $infos.Count -eq $ExpectedAssociationCount
         }
-        $null = Invoke-PSUtilWait $cmd 'Associate Apply' -RetrySeconds 500 -SleepTimeInMilliSeconds 20000
+        $null = Invoke-PSUtilWait $cmd 'Associate Apply' -RetrySeconds 500 -SleepTimeInMilliSeconds 30000
 
 
         $size = 0
 
-        $infos = Get-SSMInstanceAssociationsStatus -InstanceId $instanceid
+        $infos = GetSSMInstanceAssociationsStatus -InstanceId $instanceid -AssociationId $AssociationId -DocumentName $DocumentName
         foreach ($info in $infos) {
             $association = Get-SSMAssociation -AssociationId $info.AssociationId
-            if ($association.OutputLocation -and $ContainsString.Length -gt 0) {
+            if ($association.OutputLocation -and ($ContainsString.Length -gt 0 -or $MinS3OutputSize -gt 0)) {
                 $key = "$($association.OutputLocation.S3Location.OutputS3KeyPrefix)/$instanceid/$($association.AssociationId)/"
                 $bucket=$association.OutputLocation.S3Location.OutputS3BucketName
             
@@ -165,7 +216,7 @@ function SSMWaitForAssociation([string[]]$InstanceIds, [int]$ExpectedAssociation
                         break
                     }
                     Write-Verbose "Sleeping $bucket/$key Count=$($s3objects.Count)"
-                    Sleep 2
+                    Sleep 5
                 }
                 if ($retryCount -ge 5) {
                     throw "Key count is zero $bucket/$key"
@@ -204,10 +255,11 @@ function SSMWaitForAssociation([string[]]$InstanceIds, [int]$ExpectedAssociation
             throw "S3Output is less than expected S3OutputSize=$size, Min Expected=$MinS3OutputSize"
         }
     
+    <#
         $effectiveAssociations = Get-SSMEffectiveInstanceAssociationList -InstanceId $instanceid -MaxResult 5
         if ($effectiveAssociations.Count -ne $ExpectedAssociationCount) {
             throw "Effective Association Count did not match. Expected=$ExpectedAssociationCount, got=$($effectiveAssociations.Count)"
-        }
+        }#>
     }
 }
 
@@ -227,7 +279,7 @@ function SSMRefreshAssociation ([string[]]$InstanceIds, [string]$AssociationIds)
             $status1 = (Get-SSMCommand -CommandId $result.CommandId).Status
             ($status1 -ne 'Pending' -and $status1 -ne 'InProgress')
         }
-        $null = SSMWait -Cmd $cmd -Message 'Command Execution' -RetrySeconds 300 -SleepTimeInMilliSeconds 3000
+        $null = Invoke-PSUtilWait -Cmd $cmd -Message 'Command Execution' -RetrySeconds 300 -SleepTimeInMilliSeconds 4000
     
         $command = Get-SSMCommand -CommandId $result.CommandId
         if ($command.Status -ne 'Success') {
@@ -413,8 +465,8 @@ function SSMRemoveSecurityGroup ([string]$SecurityGroupName = 'winec2securitygro
         ? { $_.GroupName -eq $securityGroupName }).GroupId
 
     if ($securityGroupId) {
-        SSMWait {(Remove-EC2SecurityGroup $securityGroupId -Force) -eq $null} `
-                'Delete Security Group' 300
+        Invoke-PSUtilWait -Cmd {(Remove-EC2SecurityGroup $securityGroupId -Force) -eq $null} `
+                -Message 'Delete Security Group' -RetrySeconds 300
         Write-Verbose "Security Group $securityGroupName removed"
     } else {
         Write-Verbose "Skipping as SecurityGroup $securityGroupName not found"
@@ -490,7 +542,7 @@ function SSMCreateWindowsInstance (
                     -PemFile $keyfile -Decrypt 
                 $password -ne $null
                 }
-        SSMWait $cmd 'Password Generation' 600
+        Invoke-PSUtilWait -Cmd $cmd -Message 'Password Generation' -RetrySeconds 600
 
         $password = Get-EC2PasswordData -InstanceId $instance.InstanceId `
                         -PemFile $keyfile -Decrypt 
@@ -512,7 +564,7 @@ function SSMCreateWindowsInstance (
         $count = (Get-SSMInstanceInformation -InstanceInformationFilterList @{ Key='InstanceIds'; ValueSet=$instances.InstanceId}).Count
         $count -eq $InstanceCount
     }
-    SSMWait $cmd 'Instance Registration' 300
+    Invoke-PSUtilWait $cmd 'Instance Registration' 300
     $instances.InstanceId
 }
 function SSMCreateLinuxInstance (
@@ -595,7 +647,7 @@ fi
         $count = (Get-SSMInstanceInformation -InstanceInformationFilterList @{ Key='InstanceIds'; ValueSet=$instances.InstanceId}).Count
         $count -eq $InstanceCount
     }
-    SSMWait $cmd 'Instance Registration' 300
+    Invoke-PSUtilWait -Cmd $cmd -Message 'Instance Registration' -RetrySeconds 300
     $instances.InstanceId
 }
 function SSMRemoveInstance (
@@ -630,7 +682,7 @@ function SSMRunCommand (
         [string]$Outputs3BucketName,
         [string]$Outputs3KeyPrefix = 'ssm/command',
         [int]$Timeout = 300,
-        [int]$SleepTimeInMilliSeconds = 2000
+        [int]$SleepTimeInMilliSeconds = 4000
     )
 {
     Write-Verbose "SSMRunCommand: InstanceIds=$InstanceIds, DocumentName=$DocumentName, Outputs3BucketName=$Outputs3BucketName, Outputs3KeyPrefix=$Outputs3KeyPrefix"
@@ -649,12 +701,12 @@ function SSMRunCommand (
     }
     $result=Send-SSMCommand @parameters 
 
-    Write-Verbose "CommandId=$($result.CommandId)"
+    Write-Verbose "#PSTEST# CommandId=$($result.CommandId)"
     $cmd = {
         $status1 = (Get-SSMCommand -CommandId $result.CommandId).Status
         ($status1 -ne 'Pending' -and $status1 -ne 'InProgress')
     }
-    $null = SSMWait -Cmd $cmd -Message 'Command Execution' -RetrySeconds $Timeout -SleepTimeInMilliSeconds $SleepTimeInMilliSeconds
+    $null = Invoke-PSUtilWait -Cmd $cmd -Message 'Command Execution' -RetrySeconds $Timeout -SleepTimeInMilliSeconds $SleepTimeInMilliSeconds
     
     $command = Get-SSMCommand -CommandId $result.CommandId
     if ($command.Status -ne 'Success') {
@@ -721,6 +773,7 @@ function SSMDumpOutput (
     }
 }
 
+<#
 function SSMWait (
     [ScriptBlock] $Cmd, 
     [string] $Message, 
@@ -758,7 +811,7 @@ function SSMWait (
     }
 }
 
-
+#>
 
 
 
@@ -1041,7 +1094,7 @@ function Test-SSMOuput (
                 $pluginOutput = $pluginOutput.Trim()
             }
             Write-Verbose "Output from plugin:`n$pluginOutput"
-            if ($ExpectedOutput -and $pluginOutput -and $pluginOutput.contains($ExpectdOutput)) {
+            if ($ExpectedOutput -and $pluginOutput -and $pluginOutput.contains($ExpectedOutput)) {
                 #Write-Verbose "Found the expected string '$ExpectedOutput' in output"
                 $found = $true
             }
@@ -1099,3 +1152,28 @@ function Test-SSMOuput (
     }
 }
 
+function Invoke-AWSCLI () {
+    [CmdletBinding()]
+    Param ([string]$Command='ssm', [string]$SubCommand, [string]$InputJson, $EndpointUrl, [switch]$VerboseInputOutput = $true)
+
+    if ($VerboseInputOutput) {
+        Write-Verbose "Input:`n$InputJson"
+    }
+    Write-Verbose "Command=$Command, SubCommand=$SubCommand, EndPointUrl=$EndpointUrl"
+
+    $tempFile = [System.IO.Path]::GetTempFileName()
+    $InputJson | Out-File -Encoding ascii $tempFile
+
+    if ($EndpointUrl) {
+        $outputJson = aws $command $SubCommand --cli-input-json file://$tempFile --endpoint-url $EndpointUrl | ConvertFrom-Json
+    } else {
+        $outputJson = aws $command $SubCommand --cli-input-json file://$tempFile | ConvertFrom-Json
+    }
+    $outputJson
+
+    if ($VerboseInputOutput) {
+        Write-Verbose "Output:`n$($outputJson | ConvertTo-Json -Depth 5)"
+    }
+
+    del $tempFile -Force -EA 0
+}

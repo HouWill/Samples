@@ -12,6 +12,7 @@ trap { "Error [$($_.InvocationInfo.ScriptName.split('\/')[-1]):$($_.InvocationIn
 
 $endpoint = $null
 
+$PSDefaultParameterValues = $null
 if ($endpoint) {
     $PSDefaultParameterValues = @{
         ‘*-SSM*:EndpointUrl’ = $endpoint
@@ -19,9 +20,14 @@ if ($endpoint) {
     } 
     Set-DefaultAWSRegion $endpoint.Split('.')[1]
 } else {
-    $PSDefaultParameterValues = $null
+    $PSDefaultParameterValues = @{
+    }
 }
 
+#disable verbose setting for all functions in AWSPowerShells
+foreach ($cmdinfo in (gcm -Module 'AwSPowerShell')) {
+    $PSDefaultParameterValues."$($cmdinfo.Name):Verbose" = $false
+}
 
 
 Import-Module -Global PSTest -Force -Verbose:$false
@@ -41,3 +47,4 @@ SSMSetTitle ''
 SSMCreateKeypair -KeyName 'test'
 SSMCreateRole -RoleName 'test'
 SSMCreateSecurityGroup -SecurityGroupName 'test'
+

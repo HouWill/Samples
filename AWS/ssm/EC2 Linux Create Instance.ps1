@@ -18,7 +18,6 @@ SSMSetTitle "$Name, EC2"
 
 . "$PSScriptRoot\EC2 Terminate Instance.ps1" $Name
 
-
 #Create Instance
 $userdata = @'
 #cloud-config
@@ -107,10 +106,10 @@ $instances = New-WinEC2Instance -Name $Name -InstanceType $InstanceType `
 
 $obj = @{}
 $obj.'InstanceType' = $instances[0].Instance.InstanceType
-$InstanceIds = $Obj.'InstanceId' = $instances.InstanceId
+$InstanceIds = $Obj.'InstanceIds' = $instances.InstanceId
 $Obj.'ImageName' = (get-ec2image $instances[0].Instance.ImageId).Name
 $obj.'PublicIpAddress' = $instances.PublicIpAddress
-$obj.'SSMHeartBeat' = $instances[0].Time.SSMHeartBeat
+$obj.'Time' = $instances[0].Time.SSMHeartBeat.ToString() + ' SSM HB Time'
 
 <#
 foreach ($instance in $instances) {

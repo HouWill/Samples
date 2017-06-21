@@ -1,20 +1,22 @@
 ﻿param (
     $Name = (Get-PSUtilDefaultIfNull -value $Name -defaultValue 'ssmlinux'), 
+    $ParallelIndex,
     $InstanceIds = $InstanceIds,
     $Region = (Get-PSUtilDefaultIfNull -value (Get-DefaultAWSRegion) -defaultValue 'us-east-1'),
     [string] $SetupAction = ''  # SetupOnly or CleanupOnly
     )
 
+. $PSScriptRoot\ssmcommon.ps1
 Set-DefaultAWSRegion $Region
+$parallelName = "$Name$ParallelIndex"
+$ErrorActionPreference='continue'
+$MWName = "$($parallelName)-MW-Every-Five-Min"
 
 if ($InstanceIds.Count -eq 0) {
-    Write-Verbose "InstanceIds is empty, retreiving instance with Name=$Name"
+    Write-Verbose "InstanceIds is empty, retreiving instance with Name=$Name, ParallelIndex=$ParallelIndex"
     $InstanceIds = (Get-WinEC2Instance $Name -DesiredState 'running').InstanceId
 }
-Write-Verbose "Maintenance Window: Name=$Name, InstanceId=$instanceIds, SetupAction=$SetupAction"
-
-$ErrorActionPreference='continue'
-$MWName = "$($Name)-MW-Every-Five-Min"
+Write-Verbose "Maintenance Window: Name=$Name, InstanceId=$instanceIds, SetupAction=$SetupAction, ParallelIndex=$ParallelIndex"
 
 $window = Get-SSMMaintenanceWindowList -Filter @{Key='Name';Values=$MWName}
 if ($window) {
@@ -42,7 +44,7 @@ if ($SetupAction -eq 'SetupOnly') {
 }       
         
 $cmd = { Get-SSMMaintenanceWindowExecutionList -WindowId $windowId | select -Last 1 }
-$execution = Invoke-PSUtilWait -Cmd $cmd 'MW Execution' -RetrySeconds 500 -PrintVerbose -SleepTimeInMilliSeconds 10000
+$execution = Invoke-PSUtilWait -Cmd $cmd 'MW Execution' -RetrySeconds 500 -PrintVerbose -SleepTimeInMilliSeconds 45000
 
 $cmd = {
     $a = Get-SSMMaintenanceWindowExecutionTaskList -WindowExecutionId $execution.WindowExecutionId
@@ -50,7 +52,7 @@ $cmd = {
         $a
     }
 }
-$taskexecution = Invoke-PSUtilWait -Cmd $cmd 'MW Task Complete' 
+$taskexecution = Invoke-PSUtilWait -Cmd $cmd 'MW Task Complete' -PrintVerbose
 
 
 $taskinvocation = Get-SSMMaintenanceWindowExecutionTaskInvocationList -WindowExecutionId $execution.WindowExecutionId -TaskId $taskexecution.TaskExecutionId

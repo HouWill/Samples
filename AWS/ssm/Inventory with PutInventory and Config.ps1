@@ -1,4 +1,7 @@
-﻿param (
+﻿#Directly calls Write-SSMInventory and checks with Config
+#can't be executed in parallel
+
+param (
     $Name = (Get-PSUtilDefaultIfNull -value $Name -defaultValue 'ssmlinux'), 
     $InstanceIds = $InstanceIds,
     $Region = (Get-PSUtilDefaultIfNull -value (Get-DefaultAWSRegion) -defaultValue 'us-east-1')
@@ -11,33 +14,6 @@ if ($InstanceIds.Count -eq 0) {
     $InstanceIds = (Get-WinEC2Instance $Name -DesiredState 'running').InstanceId
 }
 Write-Verbose "Inventory 1: InstanceIds=$InstanceIds"
-
-
-function Invoke-AWSCLI () {
-    [CmdletBinding()]
-    Param ([string]$Command='ssm', [string]$SubCommand, [string]$InputJson, $EndpointUrl, [switch]$VerboseInputOutput = $true)
-
-    if ($VerboseInputOutput) {
-        Write-Verbose "Input:`n$InputJson"
-    }
-    Write-Verbose "Command=$Command, SubCommand=$SubCommand, EndPointUrl=$EndpointUrl"
-
-    $tempFile = [System.IO.Path]::GetTempFileName()
-    $InputJson | Out-File -Encoding ascii $tempFile
-
-    if ($EndpointUrl) {
-        $outputJson = aws $command $SubCommand --cli-input-json file://$tempFile --endpoint-url $EndpointUrl | ConvertFrom-Json
-    } else {
-        $outputJson = aws $command $SubCommand --cli-input-json file://$tempFile | ConvertFrom-Json
-    }
-    $outputJson
-
-    if ($VerboseInputOutput) {
-        Write-Verbose "Output:`n$($outputJson | ConvertTo-Json -Depth 5)"
-    }
-
-    del $tempFile -Force -EA 0
-}
 
 
 function GetApplicationItem ($Name, $Publisher, $URL, $Version, $ApplicationType, $InstalledTime, $Architecture) {
@@ -56,37 +32,10 @@ function GetApplicationItem ($Name, $Publisher, $URL, $Version, $ApplicationType
 foreach ($instanceId in $InstanceIds) {
     Write-Verbose "InstanceId=$instanceId"
 
-    $items = @{
-	    CaptureTime='2016-08-22T10:01:01Z'
-	    TypeName= 'AWS:Application'
-	    Content= @(
-                @{
-                    Name= "acl$Name"
-                    Publisher= 'Amazon.com' 
-                    URL= 'http://acl.bestbits.at/' 
-                    Version= '2.2.49' 
-                    ApplicationType= 'System Environment/Base' 
-                    InstalledTime= '2016-09-23T10:01:17Z' 
-                    Architecture= 'x86_64'
-                },
-                @{
-                    Name= "acpid$Name"
-                    Publisher= 'Amazon.com' 
-                    URL= 'http://acpid.sourceforge.net/' 
-                    Version= '1.0.10' 
-                    ApplicationType= 'System Environment/Daemons' 
-                    InstalledTime= '2016-09-23T10:01:13Z' 
-                    Architecture= 'x86_64'
-                }
-            )
-    	    SchemaVersion= '1.0'
-        }
-
     $item = New-Object "Amazon.SimpleSystemsManagement.Model.InventoryItem"
     $item.CaptureTime = '2016-08-22T10:01:01Z'
     $item.SchemaVersion='1.0'
     $item.TypeName='AWS:Application'
-    #$item.Content = New-Object 'System.Collections.Generic.List[System.Collections.Generic.Dictionary[String,String]]'
     $item.Content.Add((GetApplicationItem "acl$Name" 'Amazon.com'  'http://acl.bestbits.at/' '2.2.49' 'System Environment/Base' '2016-09-23T10:01:17Z'  'x86_64'))
     $item.Content.Add((GetApplicationItem "acpid$Name" 'Amazon.com'  'http://acpid.sourceforge.net/' '1.0.10' 'System Environment/Daemons' '2016-09-23T10:01:13Z'  'x86_64'))
 

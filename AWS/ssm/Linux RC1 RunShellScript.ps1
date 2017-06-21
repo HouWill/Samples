@@ -4,6 +4,7 @@
     $Region = (Get-PSUtilDefaultIfNull -value (Get-DefaultAWSRegion) -defaultValue 'us-east-1')
     )
 
+. $PSScriptRoot\ssmcommon.ps1
 Set-DefaultAWSRegion $Region
 
 if ($InstanceIds.Count -eq 0) {

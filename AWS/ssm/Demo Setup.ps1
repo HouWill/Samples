@@ -19,10 +19,11 @@ $InputParameters = @{
     Name="Linux"
     SetupAction='SetupOnly'
     ImagePrefix='amzn-ami-hvm-*gp2'
+    InstanceCount=4
 }
 Invoke-PsTest -Test $tests -InputParameters $InputParameters  -Count 1 -StopOnError -LogNamePrefix 'EC2 Linux'
 
-return
+#return
 
 $tests = @(
     "$PSScriptRoot\EC2 Windows Create Instance.ps1"

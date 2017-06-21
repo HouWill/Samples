@@ -94,3 +94,6 @@ Get-EC2Image -Owner 'self' | Unregister-EC2Image
 Get-EC2Snapshot -OwnerId 'self' | Remove-EC2Snapshot -Force
 
 Get-SSMDocumentList -DocumentFilterList @{key='Owner';Value='self'} | % { SSMDeleteDocument $_.Name }
+
+Get-SSMAssociationList | % { Remove-SSMAssociation -AssociationId $_.AssociationId -Force }
+Get-SSMMaintenanceWindowList | % { Remove-SSMMaintenanceWindow -WindowId $_.WindowId -Force }
