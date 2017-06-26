@@ -30,6 +30,7 @@ foreach ($cmdinfo in (gcm -Module 'AwSPowerShell')) {
 }
 
 
+Import-Module -Global WinEC2 -Force -Verbose:$false
 Import-Module -Global PSTest -Force -Verbose:$false
 . $PSScriptRoot\ssmcommon.ps1
 

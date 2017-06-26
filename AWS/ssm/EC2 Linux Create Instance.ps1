@@ -4,19 +4,22 @@
 #            Some thing like '0', '1', etc when running in parallel
 
 param ($Name = 'ssmlinux', 
+        $ParallelIndex,
         $InstanceType = 't2.micro',
         #$ImagePrefix= 'ubuntu/images/hvm-ssd/ubuntu-xenial-16*', 
         $ImagePrefix='amzn-ami-hvm-*gp2', 
         $keyFile = 'c:\keys\test.pem',
-        $InstanceCount=2,
+        $InstanceCount=3,
         $Region = (Get-PSUtilDefaultIfNull -value (Get-DefaultAWSRegion) -defaultValue 'us-east-1'))
 
+$parallelName = "$Name$ParallelIndex"
+. $PSScriptRoot\ssmcommon.ps1
 Set-DefaultAWSRegion $Region
 
-Write-Verbose "EC2 Linux Create Instance Name=$Namme, ImagePrefix=$ImagePrefix, keyFile=$keyFile, InstanceCount=$InstanceCount, Region=$Region"
-SSMSetTitle "$Name, EC2"
+Write-Verbose "EC2 Linux Create Instance Name=$Namme, ImagePrefix=$ImagePrefix, keyFile=$keyFile, InstanceCount=$InstanceCount, Region=$Region, ParallelIndex=$ParallelIndex"
+SSMSetTitle "$parallelName, EC2"
 
-. "$PSScriptRoot\EC2 Terminate Instance.ps1" $Name
+. "$PSScriptRoot\EC2 Terminate Instance.ps1" $parallelName
 
 #Create Instance
 $userdata = @'
@@ -98,18 +101,17 @@ if (Get-EC2SecurityGroup | ? GroupName -eq 'corp') {
 }
 
 Write-Verbose 'Creating EC2 Windows Instance.'
-$instances = New-WinEC2Instance -Name $Name -InstanceType $InstanceType `
+$instances = New-WinEC2Instance -Name $parallelName -InstanceType $InstanceType `
                         -ImagePrefix $ImagePrefix -Linux `
                         -IamRoleName 'test' -SecurityGroupName $securityGroup -KeyPairName 'test' `
-                        -UserData $userdata -SSMHeartBeat -InstanceCount $InstanceCount
+                        -UserData $userdata -SSMHeartBeat -InstanceCount $InstanceCount -Timeout 200
 
 
 $obj = @{}
 $obj.'InstanceType' = $instances[0].Instance.InstanceType
 $InstanceIds = $Obj.'InstanceIds' = $instances.InstanceId
 $Obj.'ImageName' = (get-ec2image $instances[0].Instance.ImageId).Name
-$obj.'PublicIpAddress' = $instances.PublicIpAddress
-$obj.'Time' = $instances[0].Time.SSMHeartBeat.ToString() + ' SSM HB Time'
+$obj.'SSMHeartBeatSincePing' = $instances[0].Time.SSMHeartBeatSincePing.ToString()
 
 <#
 foreach ($instance in $instances) {

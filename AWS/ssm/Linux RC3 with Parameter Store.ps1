@@ -40,7 +40,7 @@ $doc = @"
             "type":"String",
             "description":"(Optional) Fetched from parameter store based on environment",
             "displayType":"textarea",
-            "default": "{{ssm:test$($parallelName)hello}}"
+            "default": "defaultvalue"
         }
     },
     "mainSteps": [
@@ -50,7 +50,7 @@ $doc = @"
             "inputs": {
                 "runCommand": [
                     "echo Document1.v6 environment = {{ environment }}",
-                    "echo Document1.v5 hello = {{ hello }}"
+                    "echo Document1.v5 hello = {{ssm:{{ environment }}$($parallelName)hello}}"
                  ]
             }
         }
