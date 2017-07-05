@@ -9,7 +9,7 @@ param ($Name = 'ssmlinux',
         #$ImagePrefix= 'ubuntu/images/hvm-ssd/ubuntu-xenial-16*', 
         $ImagePrefix='amzn-ami-hvm-*gp2', 
         $keyFile = 'c:\keys\test.pem',
-        $InstanceCount=3,
+        $InstanceCount=5,
         $Region = (Get-PSUtilDefaultIfNull -value (Get-DefaultAWSRegion) -defaultValue 'us-east-1'))
 
 $parallelName = "$Name$ParallelIndex"
@@ -88,9 +88,10 @@ if [ -f /etc/debian_version ]; then
     curl https://amazon-ssm-$Region.s3.amazonaws.com/latest/debian_amd64/amazon-ssm-agent.deb -o amazon-ssm-agent.deb
     dpkg -i amazon-ssm-agent.deb
 else
-    echo "Amazon Linux or Redhat"
-    curl https://amazon-ssm-$Region.s3.amazonaws.com/latest/linux_amd64/amazon-ssm-agent.rpm -o amazon-ssm-agent.rpm
+    echo "$(date) Amazon Linux or Redhat"
+    curl https://amazon-ssm-$Region.s3.amazonaws.com/latest/linux_amd64/amazon-ssm-agent.rpm -o amazon-ssm-agent.rpm curl --connect-timeout 5 --max-time 10 --retry 5 --retry-delay 1 --retry-max-time 60 -s -S --speed-limit 1 --speed-time 60
     yum install -y amazon-ssm-agent.rpm
+    echo "$(date) SSM agent installation complete"
 fi
 
 "@.Replace("`r",'')
@@ -104,13 +105,15 @@ Write-Verbose 'Creating EC2 Windows Instance.'
 $instances = New-WinEC2Instance -Name $parallelName -InstanceType $InstanceType `
                         -ImagePrefix $ImagePrefix -Linux `
                         -IamRoleName 'test' -SecurityGroupName $securityGroup -KeyPairName 'test' `
-                        -UserData $userdata -SSMHeartBeat -InstanceCount $InstanceCount -Timeout 200
+                        -UserData $userdata -SSMHeartBeat -InstanceCount $InstanceCount -Timeout 120 -DontCleanUp
 
 
 $obj = @{}
 $obj.'InstanceType' = $instances[0].Instance.InstanceType
 $InstanceIds = $Obj.'InstanceIds' = $instances.InstanceId
 $Obj.'ImageName' = (get-ec2image $instances[0].Instance.ImageId).Name
+$obj.'PingTime' = $instances[0].Time.Ping.ToString()
+$obj.'SSHTime' = $instances[0].Time.SSH.ToString()
 $obj.'SSMHeartBeatSincePing' = $instances[0].Time.SSMHeartBeatSincePing.ToString()
 
 <#

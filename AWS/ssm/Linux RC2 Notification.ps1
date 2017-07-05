@@ -109,7 +109,7 @@ function queueShouldBeEmpty ($sqs)
 #Run Command with invocation notification
 #
 #Clear-SQSQueue $sqs
-for ($i=0; $i -lt 1; $i++) {
+for ($i=0; $i -lt 0; $i++) {
     Write-Verbose ''
     Write-Verbose "Invocation Notification: #$i Sending Command ifconfig InstanceId=$InstanceIds"
     $command = Send-SSMCommand -InstanceIds $InstanceIds -DocumentName 'AWS-RunShellScript' -Parameters @{commands='ifconfig'} `
@@ -129,7 +129,7 @@ for ($i=0; $i -lt 1; $i++) {
 #
 #Run Command with Command notification
 #
-for ($i=0; $i -lt 0; $i++) {
+for ($i=0; $i -lt 1; $i++) {
     Write-Verbose ''
     Write-Verbose "Command Notification: #$i Sending Command ifconfig InstanceId=$InstanceIds"
     $command = Send-SSMCommand -InstanceIds $InstanceIds -DocumentName 'AWS-RunShellScript' -Parameters @{commands='ifconfig'} `

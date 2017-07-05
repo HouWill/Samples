@@ -197,7 +197,7 @@ function SSMWaitForAssociation(
             }
             $found -and $infos.Count -eq $ExpectedAssociationCount
         }
-        $null = Invoke-PSUtilWait $cmd 'Associate Apply' -RetrySeconds 100 -SleepTimeInMilliSeconds 30000
+        $null = Invoke-PSUtilWait $cmd 'Associate Apply' -RetrySeconds 200 -SleepTimeInMilliSeconds 30000
 
 
         $size = 0
@@ -1177,68 +1177,79 @@ function Invoke-AWSCLI () {
     del $tempFile -Force -EA 0
 }
 
-function SSMGetCommandInformation ($CommandId, $sb = $null) {
+function SSMGetCommandInformation ($CommandId) {
+    Write-Verbose ''
     $cmd = Get-SSMCommand -CommandId $CommandId
 
-    if (! $sb) {
-        $sb = New-Object System.Text.StringBuilder
-    }
-    $null = $sb.AppendLine("CommandId=$($cmd.CommandId), DocumentName=$($cmd.DocumentName)")
-    $null = $sb.AppendLine("  Status=$($cmd.Status), StatusDetails=$($cmd.StatusDetails), TargetCount=$($cmd.TargetCount), CompletedCount=$($cmd.CompletedCount)")
-    $null = $sb.AppendLine("  InstanceIds=$($cmd.InstanceIds)")
-    $null = $sb.AppendLine("  Targets=$(Get-PSUtilStringFromObject $cmd.Targets)")
-    $null = $sb.AppendLine("  S3BucketName=$($cmd.OutputS3BucketName), S3KeyPrefix=$($cmd.OutputS3KeyPrefix), S3Region=$($cmd.OutputS3Region)")
-    $null = $sb.AppendLine("  MaxConcurrency=$($cmd.MaxConcurrency), MaxErrors=$($cmd.MaxErrors)")
+    Write-Verbose "SSMGetCommandInformation: CommandId=$($cmd.CommandId), DocumentName=$($cmd.DocumentName)"
+    Write-Verbose "  Status=$($cmd.Status), StatusDetails=$($cmd.StatusDetails), TargetCount=$($cmd.TargetCount), CompletedCount=$($cmd.CompletedCount)"
+    Write-Verbose "  InstanceIds=$($cmd.InstanceIds)"
+    Write-Verbose "  Targets=$(Get-PSUtilStringFromObject $cmd.Targets)"
+    Write-Verbose "  S3BucketName=$($cmd.OutputS3BucketName), S3KeyPrefix=$($cmd.OutputS3KeyPrefix), S3Region=$($cmd.OutputS3Region)"
+    Write-Verbose "  MaxConcurrency=$($cmd.MaxConcurrency), MaxErrors=$($cmd.MaxErrors)"
     
-    $null = $sb.AppendLine("  Parameters:")
-    $cmd.Parameters.Keys | % { $null = $sb.AppendLine("   $_=$($cmd.Parameters.$_)") }    
+    Write-Verbose "  Parameters:"
+    $cmd.Parameters.Keys | % { Write-Verbose "   $_=$($cmd.Parameters.$_)" }    
 
-    $null = $sb.AppendLine("  Command Invocations:")
+    Write-Verbose "  Command Invocations:"
 
     foreach ($invocation in (Get-SSMCommandInvocation -CommandId $cmd.CommandId)) {
-        $null = $sb.AppendLine("    InstanceId=$($invocation.InstanceId), Status=$($invocation.Status), StatusDetail=$($invocation.StatusDetails)") 
-        $instance = Get-WinEC2Instance $invocation.InstanceId
+        Write-Verbose "    InstanceId=$($invocation.InstanceId), Status=$($invocation.Status), StatusDetail=$($invocation.StatusDetails)"
+        $instance = Get-WinEC2Instance $invocation.InstanceId 4>$null
         if ($instance) {
-            $null = $sb.AppendLine("        Platform=$($instance.PlatformName), State=$($instance.State), SSMStatus=$($instance.SSMPingStatus), AgentVersion=$($instance.AgentVersion)")
+            Write-Verbose "        Platform=$($instance.PlatformName), State=$($instance.State), SSMStatus=$($instance.SSMPingStatus), AgentVersion=$($instance.AgentVersion)"
+        }
+    }
+}
+
+#Pass optional instance ids
+function SSMGetAssociationInformation ($AssociationId, [string[]]$instanceIds = @()) {
+    Write-Verbose ''
+    $association = Get-SSMAssociation -AssociationId $AssociationId
+    
+    $target = ''; $association.Targets | % { $target += "  $($_.Key)=$($_.Values)" }
+    Write-Verbose "SSMGetAssociationInformation: AssociationId=$($association.AssociationId), DocumentName=$($association.Name), Targets=$target, ScheduleExpression=$($association.ScheduleExpression)"
+    $st = ''; $association.Overview.AssociationStatusAggregatedCount.Keys | % { $st += "  $_=$($association.Overview.AssociationStatusAggregatedCount.$_)" }
+    Write-Verbose "  Status=$($association.Overview.Status), DetailedStatus=$($association.Overview.DetailedStatus), AggregationCounts:$st"
+
+    Write-Verbose ''
+
+    foreach ($target in $association.Targets) {
+        if ($target.Key -eq 'tag:Name') {
+            $filter = @(@{Name='tag:Name';Values=$target.Values}, @{Name='instance-state-name';Values='running'})
+        } else {
+            $filter = @(@{Name='instance-id';Values=$target.Values}, @{Name='instance-state-name';Values='running'})
+        }
+        foreach ($instanceid in (Get-EC2Instance -Filter $filter).Instances.InstanceId) {
+            if (! $instanceIds.Contains($instanceid)) { $instanceIds += $instanceid }
         }
     }
 
-    return $sb
-}
-
-function SSMGetAssociationInformation ($AssociationId, $sb = $null) {
-    $association = Get-SSMAssociation -AssociationId $AssociationId
-
-    if (! $sb) {
-        $sb = New-Object System.Text.StringBuilder
+    if ($instanceIds) {
+        Write-Verbose "Instance Association Status (AssociationId=$AssociationId):"
+        foreach ($instanceId in $instanceIds) {
+            $a = GetSSMInstanceAssociationsStatus -InstanceId $instanceId -AssociationId $AssociationId 4>$null
+            Write-Verbose "  InstanceId=$($a.InstanceId) Status=$($a.Status), DetailedStatus=$($a.DetailedStatus), ErrorCode=$($a.ErrorCode), OutputUrl1=$($a.OutputUrl.S3OutputUrl.OutputUrl), ExecutionSummary=$($a.ExecutionSummary)"
+        }
     }
-    $null = $sb.AppendLine("AssociationId=$($association.AssociationId), DocumentName=$($association.Name)")
-    $null = $sb.Append("  Status=$($association.Overview.Status), DetailedStatus=$($association.Overview.DetailedStatus), AggregationCounts:")
-    $association.Overview.AssociationStatusAggregatedCount.Keys | % { $null = $sb.Append(" $_=$($association.Overview.AssociationStatusAggregatedCount.$_)") }
-    $null = $sb.AppendLine()
-
-    return $sb
 }
 
-function SSMGetAutomationExecutionInformation ($AutomationExecutionId, $sb = $null) {
+function SSMGetAutomationExecutionInformation ($AutomationExecutionId) {
+    Write-Verbose ''
     $automation = Get-SSMAutomationExecution -AutomationExecutionId $AutomationExecutionId
 
-    if (! $sb) {
-        $sb = New-Object System.Text.StringBuilder
-    }
-    $null = $sb.AppendLine("AutomationExecutionId=$($automation.AssociationId), DocumentName=$($automation.DocumentName), Version=$($automation.DocumentVersion)")
-    $null = $sb.AppendLine("  Status=$($automation.AutomationExecutionStatus), FailureMessage=$($automation.FailureMessage)")
+    Write-Verbose "SSMGetAutomationExecutionInformation: AutomationExecutionId=$($automation.AssociationId), DocumentName=$($automation.DocumentName), Version=$($automation.DocumentVersion)"
+    Write-Verbose "  Status=$($automation.AutomationExecutionStatus), FailureMessage=$($automation.FailureMessage)"
     if ($automation.Outputs) {
-        $null = $sb.AppendLine("  Output:")
-        $automation.Outputs.Keys | %{ $null = $sb.AppendLine("    $_=$($automation.Outputs.$_)") }
+        Write-Verbose "  Output:"
+        $automation.Outputs.Keys | %{ Write-Verbose "    $_=$($automation.Outputs.$_)" }
     }
     if ($automation.Parameters) {
-        $null = $sb.AppendLine("  Parameters:")
-        $automation.Parameters.Keys | %{ $null = $sb.AppendLine("    $_=$($automation.Parameters.$_)") }
+        Write-Verbose "  Parameters:"
+        $automation.Parameters.Keys | %{ Write-Verbose "    $_=$($automation.Parameters.$_)" }
     }
-    $null = $sb.AppendLine("  StepExecutions (Count=$($automation.StepExecutions.Count)):")
+    Write-Verbose "  StepExecutions (Count=$($automation.StepExecutions.Count)):"
     foreach ($step in $automation.StepExecutions) {
-        $null = $sb.AppendLine("    Action=$($step.Action), Status=$($step.StepStatus), FailureMessage=$($step.FailureMessage)")
+        Write-Verbose "    Action=$($step.Action), Status=$($step.StepStatus), FailureMessage=$($step.FailureMessage)"
     }
-    return $sb
 }

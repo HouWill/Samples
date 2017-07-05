@@ -15,7 +15,7 @@ if (! (Test-PSTestExecuting)) {
 }
 
 Write-Verbose 'Executing Run'
-
+$InstanceIds = $null
 $null = Get-SSMAssociationList | % { Remove-SSMAssociation -AssociationId $_.AssociationId -Force }
 $null = Get-S3Object -BucketName 'sivaiadbucket' -Key '/ssm' | Remove-S3Object -Force
 
@@ -26,8 +26,10 @@ if ($EC2Linux) {
             PsTest = "..\EC2 Linux Create Instance.ps1"
             PsTestOutputKeys = @('InstanceIds', 'ImageName')
             InstanceCount = 3
-            ErrorBehavior = 'SkipTests' # because if instances are not created, it does not make sense to run remaining tests
+            FailBehavior = 'SkipTests' # because if instances are not created, it does not make sense to run remaining tests
         } 
+        #"..\OnError.ps1"
+        
         @{
             PsTest = "..\Linux RC1 RunShellScript.ps1"
             PsTestRepeat = 20
@@ -38,6 +40,7 @@ if ($EC2Linux) {
             PsTestParallelCount = 5
             PsTestRepeat = 1
         }
+        
         @{
             PsTest = "..\Linux Associate2 with Custom Document.ps1"
             PsTestParallelCount = 5
@@ -83,24 +86,26 @@ if ($EC2Linux) {
             PsTestOutputKeys = @('InstanceIds', 'ImageName')
             InstanceCount = 1
             PsTestParallelCount = 5
-            PsTestRepeat = 2
+            PsTestRepeat = 10
         }
 
-        "..\ECAutomationExecution Terminate Instance.ps1"
+        "..\EC2 Terminate Instance.ps1"
     )
 
-
-    $Parameters = @{
+    $commonParameters = @{
         Name="$($Name)ssmlinux"
         ImagePrefix='amzn-ami-hvm-*gp2'
-    }
 
-    $commonParameters = @{
-        PsTestOnError='..\OnError.ps1'
-        PsTestParameterSetRepeat=1
-        PsTestMaxError=10
+        PsTestOnFail='..\OnFailure.ps1'
+        PsTestSuiteRepeat=50
+
+        PsTestSuiteMaxFail=100 # max failures allowed
+        PsTestSuiteMaxConsecutiveFailPerTest=2 #multiple failures in the same test is counted as 1 
+
+        PsTestMaxFail=2 # per test
+        PsTestMaxConsecutiveFail=3 # per test
     }
-    Invoke-PsTest -Test $tests -Parameters $Parameters -LogNamePrefix 'EC2 Linux' -CommonParameters $commonParameters
+    Invoke-PsTest -Test $tests -LogNamePrefix 'EC2 Linux' -CommonParameters $commonParameters
 
 
     if ($CFN) {
@@ -180,9 +185,7 @@ if ($AzureLinux) {
 }
 
 
-$null = gstat
-
-Convert-PsTestToTableFormat    
+#Convert-PsTestToTableFormat    
 
 
 if (! (Test-PSTestExecuting)) {
