@@ -197,7 +197,7 @@ function SSMWaitForAssociation(
             }
             $found -and $infos.Count -eq $ExpectedAssociationCount
         }
-        $null = Invoke-PSUtilWait $cmd 'Associate Apply' -RetrySeconds 500 -SleepTimeInMilliSeconds 30000
+        $null = Invoke-PSUtilWait $cmd 'Associate Apply' -RetrySeconds 200 -SleepTimeInMilliSeconds 30000
 
 
         $size = 0
@@ -209,7 +209,7 @@ function SSMWaitForAssociation(
                 $key = "$($association.OutputLocation.S3Location.OutputS3KeyPrefix)/$instanceid/$($association.AssociationId)/"
                 $bucket=$association.OutputLocation.S3Location.OutputS3BucketName
             
-                for ($retryCount=0; $retryCount -lt 50; $retryCount++) {
+                for ($retryCount=0; $retryCount -lt 5; $retryCount++) {
                     $s3objects = Get-S3Object -BucketName $bucket -KeyPrefix $key
 
                     if ($s3objects.Count -gt 0) {
@@ -272,25 +272,24 @@ function SSMRefreshAssociation ([string[]]$InstanceIds, [string]$AssociationIds)
         $batchInstanceIds = $InstanceIds[$i..($i + $batchsize -1)]
         Write-Verbose "SSMRefreshAssociation: InstanceIds=$batchInstanceIds, AssociationIds=$AssociationIds"
         $result = Send-SSMCommand -InstanceId $batchInstanceIds -DocumentName 'AWS-RefreshAssociation' -Parameters @{associationIds=$AssociationIds} -MaxConcurrency '1'
-
-        Write-Verbose "CommandId=$($result.CommandId)"
+        Write-Verbose "SSMRefreshAssociation: CommandId=$($result.CommandId)"
 
         $cmd = {
             $status1 = (Get-SSMCommand -CommandId $result.CommandId).Status
             ($status1 -ne 'Pending' -and $status1 -ne 'InProgress')
         }
-        $null = Invoke-PSUtilWait -Cmd $cmd -Message 'Command Execution' -RetrySeconds 300 -SleepTimeInMilliSeconds 4000
+        $null = Invoke-PSUtilWait -Cmd $cmd -Message 'SSMRefreshAssociation: Command Execution' -RetrySeconds 300 -SleepTimeInMilliSeconds 4000
     
         $command = Get-SSMCommand -CommandId $result.CommandId
         if ($command.Status -ne 'Success') {
-            throw "Command $($command.CommandId) did not succeed, Status=$($command.Status)"
+            throw "SSMRefreshAssociation: Command $($command.CommandId) did not succeed, Status=$($command.Status)"
         }
 
 
         foreach ($instanceId in $batchInstanceIds) {
             $invocation = Get-SSMCommandInvocation -InstanceId $InstanceId -CommandId $command.CommandId -Details:$true
             $output = $invocation.CommandPlugins[0].Output
-            Write-Verbose "RefreshAssociation InstanceId=$instanceId, Output: $output"
+            Write-Verbose "RefreshAssociation InstanceId=$instanceId, SendCommand Output: $output"
         }
     }
 }
@@ -708,7 +707,7 @@ function SSMRunCommand (
     }
     $null = Invoke-PSUtilWait -Cmd $cmd -Message 'Command Execution' -RetrySeconds $Timeout -SleepTimeInMilliSeconds $SleepTimeInMilliSeconds
     
-    $command = Get-SSMCommand -CommandId $result.CommandId
+    $command = Invoke-PSUtilRetryOnError -ScriptBlock {Get-SSMCommand -CommandId $result.CommandId} -RetryCount 1000 -IngnoreOnlySpecificErrors 'Rate exceeded' -SleepTimeInMilliSeconds 100
     if ($command.Status -ne 'Success') {
         (Get-SSMCommandInvocation -CommandId $command.CommandId -Detail $true).CommandPlugins | ? Status -eq 'Failed' | select output | Write-Verbose
         throw "Command $($command.CommandId) did not succeed, Status=$($command.Status)"
@@ -1176,4 +1175,81 @@ function Invoke-AWSCLI () {
     }
 
     del $tempFile -Force -EA 0
+}
+
+function SSMGetCommandInformation ($CommandId) {
+    Write-Verbose ''
+    $cmd = Get-SSMCommand -CommandId $CommandId
+
+    Write-Verbose "SSMGetCommandInformation: CommandId=$($cmd.CommandId), DocumentName=$($cmd.DocumentName)"
+    Write-Verbose "  Status=$($cmd.Status), StatusDetails=$($cmd.StatusDetails), TargetCount=$($cmd.TargetCount), CompletedCount=$($cmd.CompletedCount)"
+    Write-Verbose "  InstanceIds=$($cmd.InstanceIds)"
+    Write-Verbose "  Targets=$(Get-PSUtilStringFromObject $cmd.Targets)"
+    Write-Verbose "  S3BucketName=$($cmd.OutputS3BucketName), S3KeyPrefix=$($cmd.OutputS3KeyPrefix), S3Region=$($cmd.OutputS3Region)"
+    Write-Verbose "  MaxConcurrency=$($cmd.MaxConcurrency), MaxErrors=$($cmd.MaxErrors)"
+    
+    Write-Verbose "  Parameters:"
+    $cmd.Parameters.Keys | % { Write-Verbose "   $_=$($cmd.Parameters.$_)" }    
+
+    Write-Verbose "  Command Invocations:"
+
+    foreach ($invocation in (Get-SSMCommandInvocation -CommandId $cmd.CommandId)) {
+        Write-Verbose "    InstanceId=$($invocation.InstanceId), Status=$($invocation.Status), StatusDetail=$($invocation.StatusDetails)"
+        $instance = Get-WinEC2Instance $invocation.InstanceId 4>$null
+        if ($instance) {
+            Write-Verbose "        Platform=$($instance.PlatformName), State=$($instance.State), SSMStatus=$($instance.SSMPingStatus), AgentVersion=$($instance.AgentVersion)"
+        }
+    }
+}
+
+#Pass optional instance ids
+function SSMGetAssociationInformation ($AssociationId, [string[]]$instanceIds = @()) {
+    Write-Verbose ''
+    $association = Get-SSMAssociation -AssociationId $AssociationId
+    
+    $target = ''; $association.Targets | % { $target += "  $($_.Key)=$($_.Values)" }
+    Write-Verbose "SSMGetAssociationInformation: AssociationId=$($association.AssociationId), DocumentName=$($association.Name), Targets=$target, ScheduleExpression=$($association.ScheduleExpression)"
+    $st = ''; $association.Overview.AssociationStatusAggregatedCount.Keys | % { $st += "  $_=$($association.Overview.AssociationStatusAggregatedCount.$_)" }
+    Write-Verbose "  Status=$($association.Overview.Status), DetailedStatus=$($association.Overview.DetailedStatus), AggregationCounts:$st"
+
+    Write-Verbose ''
+
+    foreach ($target in $association.Targets) {
+        if ($target.Key -eq 'tag:Name') {
+            $filter = @(@{Name='tag:Name';Values=$target.Values}, @{Name='instance-state-name';Values='running'})
+        } else {
+            $filter = @(@{Name='instance-id';Values=$target.Values}, @{Name='instance-state-name';Values='running'})
+        }
+        foreach ($instanceid in (Get-EC2Instance -Filter $filter).Instances.InstanceId) {
+            if (! $instanceIds.Contains($instanceid)) { $instanceIds += $instanceid }
+        }
+    }
+
+    if ($instanceIds) {
+        Write-Verbose "Instance Association Status (AssociationId=$AssociationId):"
+        foreach ($instanceId in $instanceIds) {
+            $a = GetSSMInstanceAssociationsStatus -InstanceId $instanceId -AssociationId $AssociationId 4>$null
+            Write-Verbose "  InstanceId=$($a.InstanceId) Status=$($a.Status), DetailedStatus=$($a.DetailedStatus), ErrorCode=$($a.ErrorCode), OutputUrl1=$($a.OutputUrl.S3OutputUrl.OutputUrl), ExecutionSummary=$($a.ExecutionSummary)"
+        }
+    }
+}
+
+function SSMGetAutomationExecutionInformation ($AutomationExecutionId) {
+    Write-Verbose ''
+    $automation = Get-SSMAutomationExecution -AutomationExecutionId $AutomationExecutionId
+
+    Write-Verbose "SSMGetAutomationExecutionInformation: AutomationExecutionId=$($automation.AssociationId), DocumentName=$($automation.DocumentName), Version=$($automation.DocumentVersion)"
+    Write-Verbose "  Status=$($automation.AutomationExecutionStatus), FailureMessage=$($automation.FailureMessage)"
+    if ($automation.Outputs) {
+        Write-Verbose "  Output:"
+        $automation.Outputs.Keys | %{ Write-Verbose "    $_=$($automation.Outputs.$_)" }
+    }
+    if ($automation.Parameters) {
+        Write-Verbose "  Parameters:"
+        $automation.Parameters.Keys | %{ Write-Verbose "    $_=$($automation.Parameters.$_)" }
+    }
+    Write-Verbose "  StepExecutions (Count=$($automation.StepExecutions.Count)):"
+    foreach ($step in $automation.StepExecutions) {
+        Write-Verbose "    Action=$($step.Action), Status=$($step.StepStatus), FailureMessage=$($step.FailureMessage)"
+    }
 }

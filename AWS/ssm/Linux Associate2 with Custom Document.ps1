@@ -64,10 +64,27 @@ if ((Get-Random) % 2 -eq 0) {
 
 $associationId = (SSMAssociateTarget $DocumentName $query  @{hello=@('one')}).Associationid
 Write-Verbose "#PSTEST# AssociationId=$associationId"
-
-SSMWaitForMapping -InstanceIds $instances.InstanceId -AssociationCount 1 -AssociationId $associationId
-SSMRefreshAssociation $instances.InstanceId -AssociationIds $associationId
 SSMWaitForAssociation -InstanceId $instances.InstanceId -ExpectedAssociationCount 1 -MinS3OutputSize 13 -ContainsString 'Doc1.v1 - one' -AssociationId $associationId
+
+for ($i=1; $i -le 0; $i++) {
+    #Sleep -Seconds 5
+    Write-Verbose ''
+    Write-Verbose "Iteration=$i"
+    #SSMReStartAgent -Instances $instances
+    $cmd = {
+        SSMRefreshAssociation $instances.InstanceId -AssociationIds $associationId
+        SSMWaitForAssociation -InstanceId $instances.InstanceId -ExpectedAssociationCount 1 -MinS3OutputSize 13 -ContainsString 'Doc1.v1 - one' -AssociationId $associationId
+    }
+    try {
+        Invoke-PSUtilRetryOnError -ScriptBlock $cmd -RetryCount 1
+    } catch {
+        $sb = SSMGetAssociationInformation -AssociationId $associationId
+        Write-Verbose ''
+        Write-Verbose $sb.ToString()
+        throw
+    }
+
+}
 
 #Update the Document to v2
 $doc1v2 = getdocument '2'
@@ -79,15 +96,23 @@ if ($a.Content -ne $doc1v2) {
 }
 Write-Verbose "$DocumentName updated to v2"
 
-
+<#
 #delete any previous data from S3
-Sleep -Seconds 15
+#Sleep -Seconds 15
 SSMAssociateDeleteS3 -AssociationId $associationId
 
 
 #Wait for Association to converge after Document update
-SSMRefreshAssociation $instances.InstanceId
-SSMWaitForAssociation -InstanceId $instances.InstanceId -ExpectedAssociationCount 1 -MinS3OutputSize 13 -ContainsString 'Doc1.v2 - one' -AssociationId $associationId
+for ($i=1; $i -le 1; $i++) {
+    #Sleep -Seconds 5
+    Write-Verbose ''
+    Write-Verbose "Iteration=$i"
+    #SSMReStartAgent -Instances $instances
+
+    SSMRefreshAssociation $instances.InstanceId
+    SSMWaitForAssociation -InstanceId $instances.InstanceId -ExpectedAssociationCount 1 -MinS3OutputSize 13 -ContainsString 'Doc1.v2 - one' -AssociationId $associationId
+}
+#>
 
 Remove-SSMAssociation -AssociationId $associationId -Force
 

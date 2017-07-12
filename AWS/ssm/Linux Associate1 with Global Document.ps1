@@ -30,9 +30,10 @@ if ((Get-Random) % 2 -eq 0) {
 $associationId = (SSMAssociateTarget 'AWS-RunShellScript' $query @{commands=@('ifconfig')}).Associationid
 Write-Verbose "#PSTEST# AssociationId=$associationId"
 
-SSMWaitForMapping -InstanceIds $instances.InstanceId -AssociationCount 1 -AssociationId $associationId
-SSMRefreshAssociation $instances.InstanceId
+#SSMWaitForMapping -InstanceIds $instances.InstanceId -AssociationCount 1 -AssociationId $associationId
+#SSMRefreshAssociation $instances.InstanceId
 SSMWaitForAssociation -InstanceId $instances.InstanceId -ExpectedAssociationCount 1 -MinS3OutputSize 13 -AssociationId $associationId
+
 
 Remove-SSMAssociation -AssociationId $associationId -Force
 
